@@ -1,0 +1,745 @@
+---
+title: "TASK (data: pss)"
+author: "Amanda Wittendorf"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Pre-setting_plots, message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+
+standard_tema <- theme_minimal(base_size = 11, base_family = "sans") + 
+  theme(
+    plot.title = element_text(face = "bold", 
+                              size = rel(1.2), 
+                              color = "#333333"), 
+    plot.subtitle = element_text(face = "italic", 
+                                 size = rel(0.95), 
+                                 color = "#555555"), 
+    axis.title = element_text(size = rel(0.9)), 
+    axis.text = element_text(size = rel(0.85)), 
+    legend.position = "bottom"
+  )
+
+# Set as global standard-theme
+theme_set(standard_tema)
+```
+
+## DESCRIPTION ON THE DATASET
+
+The dataset pss.csv from Willert et al. (2009) includes 102 stressed participants randomized to three months of stress management treatment or a wait list control group receiving the subsequent intervention. Measurements comprise Perceived Stress Scores (PSS), recorded at baseline prior to randomization and at three and six months post-randomization. For further details, consult the study by Willert et al. (2009).
+
+**$\text{id}$:** The patients ID-number
+
+**$\text{maaling}$:** Time the measurement for made: 
+
+  - 1: Baseline (before the randomization) 
+  
+  - 2: 3 months before the randomization
+  
+  - 3: 6 months before the randomization
+ 
+**$\text{gruppe}$:** Indicates which experimental group the participant was randomized to. The variable has two levels:
+
+  - Intervention: The group that immediately started three months of stress management treatment.
+  
+  - Venteliste (Waitlist): The control group that waited for three months before receiving the same treatment.
+  
+**$\text{pss}$:** Stands for Perceived Stress Score. It is s a continuous/numerical variable on a scale from 0 to 40, where a higher score indicates a higher level of perceived stress. The value NA (Not Available) indicates missing data for that specific measurement.
+
+```{r dataset, message=FALSE, warning=FALSE, include=FALSE}
+library(statistik)
+library(lme4)
+library(lmerTest)
+
+pss_dat <- read.csv("pss.csv") |> 
+  rename(test = maaling,
+         grouping = gruppe) |> 
+  mutate(grouping = case_match(grouping, "Venteliste"   ~ "Waiting",
+                            "Intervention" ~ "Intervention",
+                            .default = grouping),
+         grouping = factor(grouping)) 
+```
+
+The format of the dataset is long which means the each measurement for one individual is contained in one column instead of two. This is shown underneath: 
+
+```{r overview, echo=FALSE, message=FALSE, warning=FALSE}
+library(DT)
+
+pss_dat |> 
+  as_tibble() |> 
+  datatable(
+    caption = "Table 1.1: Overview of the dataset",
+    rownames = FALSE,           # Remove row-number 
+    class = "row-border", 
+    options = list( 
+      autoWidth = TRUE)) 
+```
+
+
+To get a better overview of the dataset three plots are constructed: (a) An individual trajectory plot, (b) an individual trajectory plot stratified by group, and (c) mean trajectory plot.
+
+### Visual Overview of the Dataset {.tabset .tabset-fade}
+
+#### Individual Trajectory Plot
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(plotly)
+library(patchwork)
+
+desc_plot <- function(data_name, x_var, y_var, color_var, group_var,
+                      linewidth_str = NULL, size_str = NULL,
+                      x_name = NULL, y_name = NULL) {
+  
+  p1 <- ggplot(data_name, 
+               aes(x = {{ x_var }}, y = {{ y_var }}, color = {{ color_var }})) +
+    geom_line(linewidth = linewidth_str) +
+    geom_point(size = size_str) +
+    facet_wrap(vars({{ group_var }})) +
+    scale_color_brewer(palette = "Set2") +
+    labs(x = x_name, y = y_name, title = "Figure 1: Individual Trajectory Plot") +
+    plot_annotation(caption = "Dataset: pss.csv") & theme(legend.position = "bottom") 
+  
+  p1_final <- ggplotly(p1)
+  return(p1_final)
+}
+
+desc_plot(
+  data_name = pss_dat, 
+  x_var = test, 
+  y_var = pss, 
+  color_var = grouping, 
+  group_var = id,
+  x_name = "Time, measurements", 
+  y_name = "Perceived Stress Scores (PSS)")
+```
+
+#### Individual trajectory plot stratified by group
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+desc_plot_2 <- function(data_name, x_var, y_var, color_var, group_var,
+                        linewidth_str = NULL, size_str = NULL, 
+                        x_name = NULL, y_name = NULL) {
+  
+  # Randomisation 
+  set.seed(123)
+  
+  komplette_id <- data_name %>% 
+    group_by({{ group_var }}) %>% 
+    summarise(antal_gyldige = sum(!is.na({{ y_var }})), .groups = "drop") %>% 
+    filter(antal_gyldige == 3) %>% # Vi vil kun have dem med data på alle 3 tidspunkter
+    pull({{ group_var }})
+  
+   random_id <- data_name %>% 
+    filter({{ group_var }} %in% komplette_id) %>% 
+    distinct({{ group_var }}, {{ color_var }}) %>% 
+    group_by({{ color_var }}) %>% 
+    slice_sample(n = 4) %>% 
+    pull({{ group_var }})
+   
+     plot_data <- data_name %>% 
+    filter({{ group_var }} %in% random_id)
+  
+  p2 <- ggplot(plot_data,
+              aes(x = {{ x_var }}, y = {{ y_var }}, 
+                  group = {{ group_var }}, color = factor({{ group_var }}))) +
+    geom_line(linewidth = linewidth_str) +
+    geom_point(size = size_str) +
+    facet_wrap(vars({{ color_var }})) +
+    scale_color_discrete(palette = "Set2", type = "qual") +
+    labs(x = x_name, 
+         y = y_name, 
+         title = "Figure 2: Individual trajectory plot stratified by group (sample = 8)") +
+    plot_annotation(caption = "Dataset: pss.csv")  & theme(legend.position = "none") 
+
+    p2_final <- ggplotly(p2)
+    return(p2_final)
+}
+
+desc_plot_2(data_name = pss_dat, 
+            x_var = test, 
+            y_var = pss, 
+            color_var = grouping, 
+            group_var = id,
+            x_name = "Time, measurements", 
+            y_name = "Perceived Stress Scores (PSS)")
+```
+
+**INTERPRETATION**
+
+While Figure 3 shows a clear trend, Figure 2 shows the real biological variation between individuals which is big between individuals in the study no matter the randomisation. 
+
+Figure 1 - 2 are useful when assessing the assumption 1: *The individual trajectories must reflect the mean trajectory of the group. The random subject effect is assumed to be additive to the systematic effect.*
+
+When looking at the figures it becomes clear that the assumption is doubtful because many individuals have a stress curve which is completely flat while others have increasing stress curves. When looking at the Figure 2 the curves trend to be decreasing. Therefore the assumption of a simple additive person effect doesn't correlate to the observed difference between the individuals. A mixed linear effect model with random slopes would be better to use than a model with random interception. 
+
+#### Mean trajectory plot
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Vi genbruger funktionen, men ændrer indmaden til plot 3 (Gennemsnit)
+desc_plot_3 <- function(data_name, x_var, y_var, color_var, 
+                        linewidth_str = NULL, size_str = NULL, 
+                        x_name = NULL, y_name = NULL) {
+  
+  summary_data <- data_name %>% 
+    summarise(av_model = mean({{ y_var }}, na.rm = TRUE),
+              .by = c({{ x_var }}, {{ color_var }}))
+  
+  p3 <- ggplot(summary_data, 
+               aes(x = {{ x_var }}, y = av_model, color = {{ color_var }})) +
+    geom_line(linewidth = linewidth_str) +
+    geom_point(size = size_str) +
+    scale_color_brewer(palette = "Set2") +
+    labs(x = x_name, 
+         y = y_name, 
+         title = "Figure 3: Mean trajectory plot") +
+    plot_annotation(caption = "Dataset: pss.csv") & theme(legend.position = "bottom")
+  
+  p3_final <- ggplotly(p3)
+  return(p3_final)
+}
+
+desc_plot_3(data_name = pss_dat, 
+            x_var = test, 
+            y_var = pss, 
+            color_var = grouping,
+            x_name = "Time, measurements", 
+            y_name = "Mean PSS")
+```
+
+**INTERPRETATION**
+
+When looking at *Figure 3* shows that the intervention group (green) decreases with increase of PSS especially the first three months (measurement 1 - 2). In the same period the waiting list group (orange) decreases less. However when the waiting list group gets the same intervention after three months the same rapid decreases happens (measurement 2 - 3) while the rapid decrease stagnates for the intervention group. This effect indicates a plateau-effect meaning the effect of the intervention holds op after treatment. 
+
+## LINEAR MIXED EFFECT MODEL
+
+A model of effect for the interaction between measurement test-points ($\text{text}$) and the randomised groups is constructed. 
+
+$$
+\begin{aligned}
+Y_{ij} = \alpha &+ \beta_1 \cdot [\text{maaling}_{ij} = 2] + \beta_2 \cdot [\text{maaling}_{ij} = 3] \\
+&+ \gamma \cdot [\text{grouping}_i = \text{Waiting}] \\
+&+ \delta_1 \cdot [\text{maaling}_{ij} = 2, \text{grouping}_i = \text{Waiting}] + \delta_2 \cdot [\text{maaling}_{ij} = 3, \text{grouping}_i = \text{Waiting}] \\
+&+ a_i + \varepsilon_{ij}
+\end{aligned}
+$$
+**Null hypothesis (\(H_{0}\)):**
+There is NO interaction between measurement test-points and the randomised groups in relation to PSS-score. The development of the score over time DON'T differ depending on group membership. Thus, the treatment effect changes over time.
+
+**Alternative hypothesis \(H_{1}\):**
+There is interaction between measurement test-points and the randomised groups in relation to PSS-score. The development of the score over time differs depending on group membership. Thus, the treatment effect changes over time.
+
+**The random effect (\(a_{i}\)):**
+The variation between effects in the population (\(\tau \)) corresponds to the between-person variation.
+
+
+```{r table, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# MODELS 
+#===================================================
+model <- lmer(pss ~ test * grouping + (1 | id),
+              na.action = na.exclude,
+              data = mutate(pss_dat,
+                            test = factor(test),
+                            grouping = factor(grouping)))
+
+# 1. Fixed model
+fixed_data <- parameters(model, effects = "fixed", ci_method = "kenward") |> 
+  as.data.frame() |> 
+  mutate(`Effect_type` = "Fixed Effects")
+
+# 2. Random model
+random_data <- parameters(model, effects = "random", ci_method = "profile") |> 
+  as.data.frame() |> 
+  mutate(`Effect_type` = "Random Effects") 
+
+# 3. Combination of the two
+samlet_data <- bind_rows(fixed_data, random_data)
+
+#===================================================
+# PRINT 
+#===================================================
+print_table_combined <- function(data_frame, decimal_var = NULL, liste_var = NULL, 
+                                 list_effect = NULL, table_name = NULL, per_page = NULL,
+                                  table_note = NULL) {
+  
+  df_res <- as.data.frame(data_frame)
+  
+  # 1. Formating p-value
+  if ("p" %in% colnames(df_res)) {
+    df_res <- df_res |> 
+      mutate(
+        p = case_when(
+          p < 0.001 ~ "< 0.001",
+          p < 0.05  ~ "< 0.05",
+          TRUE      ~ as.character(round(p, 3))
+        )) }
+  
+  # 2. Rename variables ONLY if liste_var is NOT empty (NULL)
+  if (!is.null(liste_var)) {
+    df_res <- df_res |> 
+      mutate(Parameter = recode(Parameter, !!!liste_var)) }
+  
+  # 3. Adding note 
+   append_note <- if (!is.null(table_note)) {
+    JS(sprintf("function(row, data, start, end, display) {
+      var api = this.api();
+      $(api.table().container()).append('<div style=\"font-size: 0.85em; color: #555; padding-top: 8px; font-style: italic;\">Note: %s</div>');
+    }", table_note))
+  } else {
+    NULL
+  }
+  
+  # 4. Round decimals, select columns, and create an HTML table
+  df_res |> 
+    mutate(across(all_of(decimal_var), ~ round(.x, 2))) |> 
+    select(all_of(list_effect)) |> 
+    datatable(
+      caption = table_name,
+      rownames = FALSE,
+      class = "row-border",
+      options = list(
+        pageLength = per_page,
+        dom = 't',
+        ordering = FALSE,
+        drawCallback = append_note
+      )
+    )
+}
+
+tab1 <- print_table_combined(
+  data_frame  = samlet_data,
+  decimal_var = c("Coefficient", "CI_low", "CI_high"),
+  liste_var   = c(
+    "test2"              = "Test (2)",
+    "test3"              = "Test (3)",
+    "groupWaiting"       = "Waiting group",
+    "test2:groupWaiting" = "Interaction (test2:group)",
+    "test3:groupWaiting" = "Interaction (test3:group)"
+  ),
+  list_effect = c(
+    "Type"              = "Effect_type",
+    "Variabel"          = "Parameter",
+    "Estimate"          = "Coefficient",
+    "Lower limit (CI)"  = "CI_low",
+    "Higher limit (CI)" = "CI_high",
+    "p-value"           = "p"
+  ),
+  table_name  = "Table 1.2: Combined Model Effects (Fixed & Random)",
+  per_page    = 10,
+   table_note  = "CI: Confidence Interval. Reference group: Test 1, Intervention group."
+)
+tab1
+```
+
+**INTERPRETATION** 
+
+**Intercept:**
+The mean PSS score at baseline (Test 1) for participants in the Intervention group, ergo the reference group. This baseline value is statistically significantly different from zero.
+
+**Waiting group:**
+The mean PSS-score for the waiting group is `r round(samlet_data$Coefficient[2], 2)` points lower than the Intervention group. Because the p-value is non-significant and the 95% confidence interval includes zero, there is no statistically significant difference between the two groups at the start of the study.
+
+**Test (2):**
+For the intervention group (reference), the PSS score decreased significantly by an average of `r round(samlet_data$Coefficient[3], 2)` points from Test 1 to Test 2.
+
+**Test (3):**
+For the intervention group (reference), the PSS score decreased significantly by an average of `r round(samlet_data$Coefficient[4], 2)` points from Test 1 to Test 3.
+
+**Interaction Effects (Testing the \(H_{1}\) Hypothesis):**
+
+1. *Interaction (test2:group):* There is a highly statistically significant interaction effect at Test 2. The positive coefficient (`r round(samlet_data$Coefficient[5], 2)`) indicates that the Waiting group experienced a significantly smaller reduction in PSS score from baseline to Test 2 compared to the Intervention group. Specifically, while the Intervention group decreased by 6.45 points, the Waiting group only decreased by an estimated 1.13 points (\(-6.45 + 5.32\)).
+
+2. *Interaction (test3:group):* At Test 3, the interaction effect is not statistically significant as the confidence interval crosses zero. This suggests that the difference in trajectories between the two groups narrowed by the final measurement point, and we fail to reject the null hypothesis for this specific interval.
+
+**SD (Intercept):**
+This is the standard deviation of the random intercept (\(\tau \)), capturing the between-person variation. It indicates substantial individual differences in baseline PSS levels across participants.
+
+**SD (Observations):**
+This represents the residual standard deviation (\(\sigma \)), reflecting the within-person variation (unexplained measurement error or noise) over time.
+
+**Summary Conclusion* for Your Text:**
+The linear mixed-effects analysis supports the alternative hypothesis (\(H_{1}\)). A significant interaction between measurement time and group allocation was observed, demonstrating that the trajectory of PSS scores over time depends on group membership. The Intervention group showed a *significantly greater improvement in stress levels at Test 2 compared to the Waiting group, whereas this group difference in trajectory was attenuated and no longer statistically significant by Test 3.*
+
+
+### MODEL DIAGNOSTICS 
+
+```{r predicted_values, message=FALSE, warning=FALSE, include=FALSE}
+model_dia <- pss_dat %>%
+  mutate(
+    res = residuals(model, type = "pearson", scaled = TRUE), 
+    fit = fitted(model)
+  ) %>%
+  filter(!is.na(res)) 
+```
+
+A model diagnostics is used to assure that the results of the model is to be trusted. Following assumptions need to be evaluated for a model with repeated measurements: 
+
+#### 1. The individual trajectories must reflect the mean trajectory of the group. The random subject effect is assumed to be additive to the systematic effect.
+
+Already been evaluated to be satisfyingly followed previously... 
+
+#### 2. The mean value of the outcome must be a linear function of the explanatory variables.
+
+The above assumption is satisfied because two categories are included as explanatory variables and their interaction; e.g. test and grouping 
+
+#### 3. The residuals must be independent across different individuals. Once the random effects are accounted for, the error terms must not contain further structural information.
+
+This assumption is primarily evaluated based on the experimental design of the study. 
+
+Since the dataset consists of longitudinal data with repeated measurements taken on the same individuals over time, observations within the same participant are naturally dependent. However, by specifying a linear mixed-effects model with a random intercept for each participant (1 | id), we explicitly account for this clustering and within-subject correlation. *Consequently, the remaining residuals can be assumed to be independent across observations, and the assumption is considered satisfied*.
+
+#### 4. The residuals must follow the same distribution for all individuals, including having a mean of zero and homogeneous variance (homoscedasticity).
+
+This is done by constructing three different plots for the residuals against (1) the fitted values, (2) measurement time-points, and (3) grouping. 
+
+#### {.tabset .tabset-fade}
+##### Residuals vs Fitted
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+p1 <- ggplot(model_dia, aes(x = fit, y = res)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = 0, 
+             color = "#8DA0CB", linetype = "dashed",  linewidth = 0.8) +
+  labs(title = "Figure A: Residuals vs Fitted",
+       x = "Fitted values", 
+       y = "Pearson residuals") 
+
+    p1_final <- ggplotly(p1)
+    p1_final
+```
+
+**INTERPRETATION**
+
+Visual inspection shows a random scatter of points evenly distributed around the horizontal reference line (\(y = 0\)). There is no clear systematic pattern, such as a funnel or trumpet shape, indicating that the variance of the residuals remains relatively constant across all predicted values. 
+
+Consequently, the assumption of homoscedasticity is considered satisfied.
+
+##### Residuals Distributed by Measurement Timepoints
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggbeeswarm)
+
+p <- ggplot(model_dia,
+            aes(x = test, y = res)) +
+  geom_quasirandom(width = 0.2, alpha = 0.7, size = 1.5) + 
+  geom_hline(yintercept = 0, linetype = "dashed", 
+             color = "#8DA0CB", linewidth = 0.8) + 
+  labs(
+    title = "Figure B: Residuals Distributed by Measurement Timepoints",
+    x = "Measurement Timepoint (Test)",
+    y = "Pearson Residuals")
+
+p_final <- ggplotly(p)
+p_final
+```
+ 
+**INTERPRETATION**
+
+Across all three measurement times, the Pearson residuals are symmetrically clustered around the dashed reference line (\(y = 0\)), confirming that the mean of the residuals is approximately zero at each time-point. 
+
+Furthermore, the vertical spread/dispersion of the data points remains highly consistent across the timeline, demonstrating that variance does not systematically change over time.
+ 
+##### Residuals Distributed by Grouping
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+p <- ggplot(model_dia, 
+            aes(x = grouping, y = res)) + 
+  geom_quasirandom(width = 0.2, alpha = 0.7, size = 1.5) + 
+  geom_hline(yintercept = 0, linetype = "dashed", 
+             color = "#8DA0CB", linewidth = 0.8) + 
+  labs(
+    title = "Figure C: Residuals Distributed by Grouping",
+    x = "Experimental Group",
+    y = "Pearson Residuals"
+  )
+
+p_final <- ggplotly(p)
+p_final
+```
+ 
+**INTERPRETATION**
+
+When broken down by experimental condition, the residuals display an almost identical distribution pattern. Both groups exhibit a symmetric shape centered tightly at \(y = 0\) with a matching vertical range (spanning from approximately -2 to 2.5). 
+
+This uniform dispersion confirms that the error variance is homogeneous across both treatment arms.
+
+#
+
+**In conclusion:**
+Based on the combined evidence from the random scatter in the Residuals vs. Fitted plot and the uniform distributions across time and treatment arms, the assumption of homoscedasticity and a zero mean is fully satisfied. 
+
+
+#### 5. The residuals must follow a normal distribution.
+
+The evaluation of the assumption is going to be based on a Q-Q plot of Residuals 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Theoretical quadrans 
+model_dia_qq <- model_dia %>%
+  arrange(res) %>%
+  mutate(theoretical = qnorm(ppoints(n())))
+
+p <- ggplot(model_dia_qq, aes(x = theoretical, y = res)) +
+  geom_smooth(method = "lm", formula = y ~ x, 
+              color = "#8DA0CB", linetype = "dashed", se = FALSE, linewidth = 0.8) +
+  geom_point(size = 0.8, alpha = 0.7) +
+  labs(
+    title = "QQ-plot of Residuals",
+    x = "Theoretical Quantiles",
+    y = "Residuals"
+  ) 
+
+p_final <- ggplotly(p)
+p_final
+```
+
+**INTERPRETATION**
+
+The residuals is clearly following a normal distribution by the way the data points are closely place to the blue reference line. This is less prominent at the extreme lower and upper quadrants which is to be expected.
+
+The residuals is therefore evaluated to be normal distributed. 
+
+#### 6. The random effects must be independent across individuals.
+
+This assumption requires that the individual-specific deviations (the random intercepts) are mutually independent across different participants. It is evaluated based on the study's experimental design rather than a statistical test.
+
+According to the study design by Willert et al. (2009), the dataset consists of 102 stressed participants who were individually randomized into either the three-month stress management treatment group or the wait-list control group. Because the randomization occurred at the individual level—rather than in clusters such as clinics, workplaces, or families it is evaluated that there is no structural hierarchy or shared environment which would cause one patient's  PSS score to systematically depend on or influence another's. 
+
+Since the subjects were tracked as autonomous individuals, **the random effects can be safely assumed to be independent across all participants, and the assumption is fully satisfied.**
+
+
+#### 7. The random effects must follow the same distribution for all individuals, including having a mean of zero and homogeneous variance.
+
+To evaluate this assumption a boxplot is constructed for both experimental groups agains the estimated random effect, also called the Best Linear Unbiased Predictors (BLUPs). Here two specific elements are going to be evaluated; (1) if mean = 0, and (2) if the variance is homogeneous between the two experimental groups. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+blup_data_group <- pss_dat %>% 
+  group_by(id) %>% 
+  summarize(grouping = first(grouping)) %>% 
+  mutate(blup = ranef(model, drop = TRUE)$id)
+
+ggplot(blup_data_group, aes(x = grouping, y = blup)) +
+  geom_boxplot(width = 0.4, outlier.shape = NA) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "#8DA0CB", linewidth = 0.8) +
+  labs(
+    title = "Random Intercepts across Experimental Groups",
+    x = "Experimental Group",
+    y = "BLUP"
+  ) 
+
+```
+
+**INTERPRETATION**
+
+An evaluation of the first sub-assumption shows that the random intercepts for both experimental groups are centered near the blue reference line (\(y = 0\)), confirming a mean of zero. There is no evidence of systematic shift or bias in either group. 
+
+Concerning the variance, a minor difference is observed between the two groups, as the waiting group displays a marginally wider interquartile range (IQR) and slightly longer whiskers than the intervention group. This marginal variation is not considered statistically meaningful, leading to the conclusion that the variance is homogeneous across groups.
+
+#### 8. Normality of Random Effects: The individual-specific deviations (the random intercepts) follow a normal distribution around zero.
+
+To evaluate whether the individual-specific deviations (the random intercepts) follow a normal distribution around zero, a Quantile-Quantile (QQ) plot of the Best Linear Unbiased Predictors (BLUPs) was examined.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+blup_data <- tibble(blup = ranef(model, drop = TRUE)$id) %>% 
+  arrange(blup) %>% 
+  mutate(theoretical = qnorm(ppoints(n())))
+
+p <- ggplot(blup_data, aes(x = theoretical, y = blup)) +
+  geom_smooth(method = "lm", formula = y ~ x, 
+              color = "#8DA0CB", linetype = "dashed", se = FALSE, linewidth = 0.8) +
+  geom_point(size = 0.8, alpha = 0.7) +
+  labs(
+    title = "QQ-plot of Random Effects",
+    x = "Theoretical Quantiles",
+    y = "BLUP"
+  ) 
+
+p_final <- ggplotly(p)
+p_final
+```
+
+**INTERPRETATION**
+
+As shown in the plot, the empirical data points closely track the diagonal dashed reference line across the majority of the distribution, particularly throughout the central range. While there are minor, negligible deviations in the extreme upper and lower tails, the overall alignment is strong. This confirms that the subject-to-subject baseline variation in perceived stress is normally distributed around the sample mean of zero. 
+
+Consequently, the normality assumption for the random effects is considered met, validating the model's random-effects structure and standard errors.
+ 
+#### The overall conclusion 
+
+All eight assumptions have been evaluated to be satisfied which means the previous results can be trusted. 
+
+
+### EFFECT MODIFICATION
+
+To do so, an analysis of variance (ANOVA) is used to test if the explanatory variables have a statistically significant 
+effect on the response variable.
+
+1. Sum(sq): Sum of squares within and between groups
+
+2. Mean(sq): Mean of the sum of squares.
+
+3. NumDF (Numerator degrees of freedom): The number of degrees of freedom for the effect
+
+4. DenDF (Denominator Degrees of Freedom): The calculated degrees of freedom for the residual.
+
+5. F value: Ratio of variance between groups to variance within groups.
+
+6. Pr(>F): P-value indicating statistical significance.
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(lmerTest)
+library(broom)
+library(dplyr)
+library(DT)
+
+#===================================================
+# MODEL
+#===================================================
+anova_resultat <- anova(model, ddf = "Kenward-Roger")
+
+#===================================================
+# DESIGN, TABEL 
+#===================================================
+anova_formateret <- tidy(anova_resultat) %>%
+  mutate(
+    # Numeric values
+    sumsq     = round(sumsq, 2),
+    meansq    = round(meansq, 2),
+    DenDF     = round(DenDF, 2),
+    statistic = round(statistic, 2)
+  ) %>%
+  mutate(
+    # P-value
+    p.value = case_when(
+      p.value < 0.001 ~ "< 0.001",
+      p.value < 0.05  ~ "< 0.05",
+      TRUE            ~ as.character(round(p.value, 3))
+    )
+  ) %>%
+  mutate(
+    # Rename
+    term = case_match(term,
+      "test"          ~ "Measurement Timepoint (Test)",
+      "grouping"      ~ "Grouping",
+      "test:grouping" ~ "Interaction",
+      .default        = term 
+    ) ) |> 
+  rename(
+      "sum(sq)"  = sumsq,
+      "mean(sq)" = meansq,
+      "Numerator DF" = NumDF,
+      "Denominator DF" = DenDF,
+      "F value" = statistic,
+      "P value" = p.value
+    )
+
+#===================================================
+# PRINT 
+#===================================================
+datatable(anova_formateret,
+          options = list(pageLength = 3,
+                         dom = 't',
+                         ordering = FALSE),
+          rownames = FALSE,
+          class = "row-border",
+          caption = "Tabel: ANOVA-test med Kenward-Roger approximation")
+```
+
+**INTERPRETATION** 
+
+**Measurement Timepoint (Test):**
+The F-value shows a clear statistically significant change in PSS scores over time, which means that the time a measurement is conducted has a big impact on the PSS-score. 
+
+**Grouping:**
+There is no significant difference between which group the individuals in the study is randomises to and the PSS score when measurement time-point is taking into consideration. 
+
+**Interaction:**
+When looking at the interaction between the grouping and measurement time a significant difference is found. This means the groups progresses differently over time in the study and the effect of time therefore depends on which group the individuals are randomised to. 
+
+Because of the significance of the interaction the interpretation is here forward based upon this instead of each individual main effect. 
+
+### SPECIFIC EFFECTS 
+
+The above conclusion means, that we need to calculate the specific effects for the two experimental groups separately instead of looking at the main effect. Therefore, two specific effects are going to be calculated in this section: 
+
+  a. The effect at six months for the two experimental groups 
+  
+  b. The effect after three months of treatment are for both experimental groups 
+
+```{r hypothesis, echo=FALSE, warning=FALSE, message=FALSE}
+library(emmeans)
+library(DT)
+
+#===================================================
+# PRE-CALCULATIONS
+#===================================================
+# Mean 
+em <- emmeans(model, ~ grouping | test, lmer.df = "kenward-roger")
+
+# Mean Difference (MD)
+diff <- pairs(em)
+
+#===================================================
+# LAYOUTE
+#===================================================
+tabel_samlet <- bind_rows(
+  # PART A: Mean
+  as.data.frame(summary(em, infer = TRUE)) %>% 
+    mutate(Type = "Mean",
+           Effekt = as.character(grouping)) %>% 
+    rename(Lower_CL = any_of(c("lower.CL", "asymp.LCL", "LCL")),
+           Upper_CL = any_of(c("upper.CL", "asymp.UCL", "UCL"))) %>% 
+    select(test, Type, Effekt, emmean, SE, Lower_CL, Upper_CL),
+  
+  # PART B: Mean Difference
+  as.data.frame(summary(diff, infer = TRUE)) %>% 
+    mutate(Type = "MD",
+           Effekt = contrast) %>% 
+    rename(Lower_CL = any_of(c("lower.CL", "asymp.LCL", "LCL")),
+           Upper_CL = any_of(c("upper.CL", "asymp.UCL", "UCL"))) %>% 
+    select(test, Type, Effekt, estimate, SE, Lower_CL, Upper_CL, p.value)
+) %>%
+  
+  filter(test %in% c("2", "3")) %>%
+  mutate(test = case_match(test,
+    "2" ~ "3 months",
+    "3" ~ "6 months"
+  )) %>%
+  
+  arrange(test, desc(Type)) %>%
+  mutate(Estimate = coalesce(emmean, estimate)) %>%
+  select(
+    "Test Timepoint" = test,
+    "Type"           = Type,
+    "Group / Effect" = Effekt,
+    "Estimate"       = Estimate,
+    "SE"             = SE,
+    "Lower CL"       = Lower_CL,  
+    "Upper CL"       = Upper_CL, 
+    "P value"        = p.value
+  ) %>%
+  
+  mutate(`P value` = case_when(
+    `P value` < 0.001 ~ "< 0.001",
+    is.na(`P value`)  ~ "", 
+    TRUE              ~ as.character(round(`P value`, 3))
+  )) %>%
+  mutate(across(where(is.numeric), ~ round(., 2)))
+
+#===================================================
+# Print
+#===================================================
+datatable(tabel_samlet,
+          options = list(dom = 't', 
+                         pageLength = 6, 
+                         ordering = FALSE),
+          rownames = FALSE,
+          class = "row-border",
+          caption = "Tabel: Mean and Mean Difference (MD) by the experimental groups (Intervention vs. Waiting)")
+```
+
+**INTERPRETATION**
+
+The table above shows that after three months, the waiting list control group has a statistically significantly higher mean PSS score than the intervention group (\(\text{MD} = -4.18\), \(p < 0.001\)), indicating that the stress management treatment effectively reduces perceived stress.
+
+However, this group difference becomes non-significant at the six-month follow-up (\(\text{MD} = -1.22\), \(p = 0.348\)). This convergence occurs because the waiting group received the identical stress management intervention between the three- and six-month marks, resulting in a subsequent reduction in their stress scores. Furthermore, the sustained low PSS score in the intervention group from month three to month six suggests that the treatment offers a lasting, long-term effect.
+
+
+
+

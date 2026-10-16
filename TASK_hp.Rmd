@@ -1,0 +1,689 @@
+---
+title: "TASK (data: hp)"
+author: "Amanda Wittendorf"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Pre-setting_plots, message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+
+#===================================================
+# THEME
+#===================================================
+standard_tema <- theme_minimal(base_size = 11, base_family = "sans") + 
+  theme(
+    plot.title = element_text(face  = "bold", 
+                              size  = rel(1.2), 
+                              color = "#333333"), 
+    plot.subtitle = element_text(face  = "italic", 
+                                 size  = rel(0.95), 
+                                 color = "#555555"), 
+    axis.title = element_text(size = rel(0.9)), 
+    axis.text = element_text(size = rel(0.85)), 
+    legend.position = "bottom"
+  )
+
+theme_set(standard_tema)
+
+#===================================================
+# COLORS 
+#===================================================
+mint      <- "#66C2A5"
+koral     <- "#FC8D62"
+pink      <- "#E78AC3"
+blue      <- "#8DA0CB"
+apple     <- "#A6D854"
+yellow    <- "#FFD92F"
+sand      <- "#E5C494"
+stone     <- "#B3B3B3"
+color_pal <- "Set2"
+
+#===================================================
+# SIZE 
+#===================================================
+linewidth_str <- 0.6
+size_str      <- 1
+```
+
+## DESCRIPTION ON THE DATASET
+
+Contains information on measurements of the 'heart period' - the variables are:
+
+- $\text{group}$: Ether the person is physically active or passive. 
+
+- $\text{day}$: Average time in milliseconds between two consecutive heartbeats during the day
+
+- $\text{night}$: Average time in milliseconds between two consecutive heartbeats during the night
+
+```{r load_dataset, message=FALSE, warning=FALSE, include=FALSE}
+library(statistik)
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(pbkrtest)
+
+hp <- read_csv("hp.csv") |>
+  mutate(group = fct_relevel(group, "active"),
+         group = factor(group),
+         id = row_number()) |> 
+  relocate(id, .before = group)
+```
+
+
+The dataset has a *wide format* which means that each measurement for one individual in contain in one row, meaning 1 row per individual. This can be seen in the table below: 
+
+```{r wide_format, echo=FALSE, message=FALSE, warning=FALSE}
+library(DT)
+
+hp |> 
+  as_tibble() |> 
+  datatable(
+    caption = "Overview of the dataset (wide format)",
+    rownames = FALSE,           # Remove row-number 
+    class = "row-border", 
+    options = list( 
+      autoWidth = TRUE)) 
+```
+
+To make sure the analysis later is easier, the format is going to be changed to a *long format* so each measurement for one individual measurements are sorted out. In this case, a new variable $\text{time}$ is constructed with the categorize Day or Night. This simple case with only two measurement are made per individual is called *paired data*:
+
+```{r long_format, echo=FALSE, message=FALSE, warning=FALSE}
+hp_dat <- hp |> 
+  pivot_longer(cols = c("day", "night"),
+               names_to = "time", values_to = "hp") |> 
+  mutate(physical = factor(group),
+         time  = factor(time)) |> 
+  select(id, physical, time, hp)
+
+hp_dat |> 
+  as_tibble() |> 
+  datatable(
+    caption = "Overview of the dataset (long format)",
+    rownames = FALSE,           # Remove row-number 
+    class = "row-border", 
+    options = list( 
+      autoWidth = TRUE)) 
+```
+
+To get a better overview of the dataset three plots are constructed: (a) An individual trajectory plot, (b) an individual trajectory plot stratified by group, and (c) mean trajectory plot.
+
+### Visual Overview of the Dataset {.tabset .tabset-fade}
+
+#### Individual Trajectory Plot
+```{r visual_overview, echo=FALSE, message=FALSE, warning=FALSE}
+library(plotly)
+library(patchwork)
+
+ind_plot <- ggplot(hp_dat,
+                   aes(x = time, y = hp, color = physical, group = id)) +
+  geom_line(linewidth = linewidth_str) +
+  geom_point(size = size_str) +
+  facet_wrap(~ id) +
+  scale_color_brewer(palette = color_pal) +
+  labs(
+    x = "Time of the day",
+    y = "Heart periode", 
+    color = "Physical status",
+    title = "Figure A: Individual Trajectory Plot"
+  ) +
+    plot_annotation(caption = "Dataset: hp.csv") 
+
+ggplotly(ind_plot)
+```
+
+**INTERPRETATION**
+
+Figure A shows a clear paired data structure because no individual in the dataset has missing values and therefore have two data points representing a measurement made both at day and night. In addition, no negative trend is seen no matter the physical status; it either is a positive trend or no-trend. 
+
+#### Individual trajectory plot stratified by group
+```{r visual_overview1, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# RANDOMISATION
+#===================================================
+set.seed(123)
+  
+complete_id <- hp_dat |> 
+  group_by(id) |> 
+  summarise(n_valid = sum(!is.na(hp)), .groups = "drop") |> 
+  pull(id)
+
+random_id <- hp_dat |> 
+  filter(id %in% complete_id) |> 
+  distinct(id, physical) |> 
+  group_by(physical) |> 
+  slice_sample(n = 15) |> 
+  pull(id)
+
+plot_data <- hp_dat |> 
+  filter(id %in% random_id)
+
+#===================================================
+# PLOT 
+#===================================================
+plot_strat <- ggplot(plot_data,
+                     aes(x = time, y = hp, group = id)) +
+  geom_line(linewidth = linewidth_str, alpha = 0.5) +
+  geom_point(size = size_str, color = "grey30") +
+  facet_wrap(~ physical) +
+    labs(x = "Time of the day",
+         y = "Heart periode",
+         title = "Figure B: Individual trajectory plot stratified by group (n = 15)") +
+    plot_annotation(caption = "Dataset: hp.csv") 
+
+ggplotly(plot_strat)
+```
+
+**INTERPRETATION**
+
+Figure B only illustrates a sample of 15 individuals per grouping (physical activity) to make it more readable. The figure shows a between-subject variation in booth groups because of the big variation between subjects at baseline; this is more predominant for the passive group. Moreover the within-subject variation is more similar because both groups trend to be positive.
+
+#### Mean trajectory plot
+```{r visual_overview2, echo=FALSE, message=FALSE, warning=FALSE}
+summary_data <- hp_dat |>
+  summarise(average = mean(hp, na.rm = TRUE),
+            .by = c(time, physical))
+
+mean_plot <- ggplot(summary_data,
+                    aes(x = time, y = average, color = physical, group = physical)) + 
+  geom_line(linewidth = linewidth_str) +
+  geom_point(size = size_str) +
+  facet_wrap(~ physical) +
+  scale_color_brewer(palette = color_pal)  +
+    labs(x = "Time of the day",
+         y = "Heart periode",
+         title = "Figure C: Mean trajectory plot",
+         color = "Physical status") +
+    plot_annotation(caption = "Dataset: hp.csv")  & theme(legend.position = "bottom") 
+
+ggplotly(mean_plot)
+```
+
+**INTERPRETATION**
+
+The positive trend mentioned in Figure C when talked about within-subject variation is easier to see in this plot which illustrates the mean trajectory. The main effect over time is clearly positive trending no matter the grouping of activity. However, the active group has a higher positive heart period at baseline as well as higher progressive trend from day to night when comparing to the passive group. This shows, that there may be an interaction effect between the the measurements over time and the physical status.   
+
+## SYSTEMATIC EFFECTS 
+
+The purpose of this section is to test the interaction effect, ergo **testing the alternative  hypothesis \(H_{1}\)**:
+There is interaction between measurement at day or night and the physical status in relation to the heart period. The development of the outcome over time differs depending on physical status. Thus, the effect changes over time.
+
+This is done by constructing a model for repeated measurements and making an analysis of variance (ANOVA)-test.
+
+$$
+\begin{aligned}
+Y_{ij} = \alpha &+ \beta_1 \cdot [\text{time}_{ij} = \text{night}] \\
+&+ \gamma \cdot [\text{physical}_i = \text{active}] \\
+&+ \delta_1 \cdot [\text{time}_{ij} =  \text{night}, \text{physical}_i = \text{active}]  \\
+&+ a_i + \varepsilon_{ij}
+\end{aligned}
+$$
+
+```{r table, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# MODEL
+#===================================================
+model <- lmer(hp ~ time * physical + (1 | id),
+              na.action = na.exclude,
+              data = mutate(hp_dat))
+
+#===================================================
+# ANOVA
+#===================================================
+library(lmerTest)
+library(broom)
+library(dplyr)
+library(DT)
+
+anova_resultat <- anova(model, ddf = "Kenward-Roger")
+
+# DESIGN, TABEL 
+anova_formateret <- tidy(anova_resultat) |>
+  mutate(
+    # Numeric values
+    sumsq     = round(sumsq, 2),
+    meansq    = round(meansq, 2),
+    DenDF     = round(DenDF, 2),
+    statistic = round(statistic, 2)
+  ) |>
+  mutate(
+    # P-value
+    p.value = case_when(
+      p.value < 0.001 ~ "< 0.001",
+      p.value < 0.05  ~ "< 0.05",
+      TRUE            ~ as.character(round(p.value, 3))
+    )
+  ) |>
+  mutate(
+    # Rename
+    term = case_match(term,
+      "time"          ~ "Measurement Timepoint (Day vs. Night)",
+      "physical"      ~ "Physical status (active vs. passive)",
+      "time:physical" ~ "Interaction",
+      .default        = term 
+    ) ) |> 
+  rename(
+      "sum(sq)"  = sumsq,
+      "mean(sq)" = meansq,
+      "Numerator DF" = NumDF,
+      "Denominator DF" = DenDF,
+      "F value" = statistic,
+      "P value" = p.value
+    )
+
+# PRINT 
+datatable(anova_formateret,
+          options = list(pageLength = 3,
+                         dom = 't',
+                         ordering = FALSE),
+          rownames = FALSE,
+          class = "row-border",
+          caption = "Tabel: ANOVA-test med Kenward-Roger approximation")
+```
+
+**INTERPRETATION** 
+
+**Measurement Timepoint (Day vs. Night):**
+The F-value shows a clear statistically significant change in heart period over time, which means that the time a measurement is conducted has a big impact on the heart period. 
+
+**Physical status (active vs. passive):**
+There is a significant difference between which group the individuals are categorized under, in relation to the physical status and the heart period when measurement time-point is taking into consideration. 
+
+**Interaction:**
+When looking at the interaction between the physical status and measurement time a significant difference is found. This means the groups progresses differently over time in the study and the effect of time therefore depends on which group the individuals are categorized into. 
+
+Because of the significance of the interaction the interpretation is here forward based upon this instead of each individual main effect. 
+
+### Specific effects 
+
+The above conclusion means, that we need to calculate the specific effects for the two physical groups separately instead of looking at the main effect. Therefore, the specific measurement for day and night as well as the difference between these two are calculated.
+
+```{r hypothesis, echo=FALSE, warning=FALSE, message=FALSE}
+library(emmeans)
+library(DT)
+
+#===================================================
+# PRE-CALCULATIONS
+#===================================================
+# Mean per time-point (day and night) 
+em <- emmeans(model, ~ time | physical)
+
+# Mean difference between time-point 
+simple_effects <- pairs(em, by = "physical")
+
+
+#===================================================
+# LAYOUTE (DT)
+#===================================================
+tabel_samlet <- bind_rows(
+  # PART A: Mean
+  as.data.frame(summary(em, infer = TRUE)) |> 
+    mutate(Type = "Mean",
+           Effekt = as.character(physical),
+           time   = as.character(time)) |> 
+    rename(Lower_CL = any_of(c("lower.CL", "asymp.LCL", "LCL")),
+           Upper_CL = any_of(c("upper.CL", "asymp.UCL", "UCL"))) |> 
+    select(time, Type, Effekt, emmean, SE, Lower_CL, Upper_CL),
+  
+  # PART B: Mean Difference
+  as.data.frame(summary(simple_effects, infer = TRUE)) %>% 
+    mutate(Type = "MD",
+           Effekt = as.character(physical), 
+           time = contrast) %>% 
+    rename(Lower_CL = any_of(c("lower.CL", "asymp.LCL", "LCL")),
+           Upper_CL = any_of(c("upper.CL", "asymp.UCL", "UCL"))) %>% 
+    select(time, Type, Effekt, estimate, SE, Lower_CL, Upper_CL, p.value)
+) |>
+
+  mutate(Estimate = coalesce(emmean, estimate)) %>% 
+  select(
+    "Group / Effect" = Effekt,
+    "Test Timepoint" = time,
+    "Estimate"       = Estimate,
+    "SE"             = SE,
+    "Lower CL"       = Lower_CL,
+    "Upper CL"       = Upper_CL,
+    "P value"        = p.value
+  ) %>% 
+
+  mutate(Tids_orden = case_when(
+    `Test Timepoint` == "day" ~ 1,
+    `Test Timepoint` == "night" ~ 2,
+    TRUE ~ 3
+  )) %>% 
+  arrange(`Group / Effect`, Tids_orden) %>% 
+  select(-Tids_orden) %>% 
+  
+  mutate(`P value` = case_when(
+    `P value` < 0.001 ~ "< 0.001",
+    is.na(`P value`)  ~ "", 
+    TRUE              ~ as.character(round(`P value`, 3))
+  )) |>
+  mutate(across(where(is.numeric), ~ round(., 2)))
+
+#===================================================
+# Print
+#===================================================
+datatable(tabel_samlet,
+          options = list(dom = 't', 
+                         pageLength = 6, 
+                         ordering = FALSE),
+          rownames = FALSE,
+          class = "row-border",
+          caption = "Tabel: Mean and Mean Difference (MD) for the specific effects")
+```
+**INTERPRETATION**
+
+The table shows, that there is a significant difference between physical status in which the active group has a higher heart period than the passive group no matter the test time-point. 
+
+
+### Model diagnostics
+
+To be sure that the above calculations can be trusted, a model diagnostics are conducted. 
+
+```{r predicted_values, message=FALSE, warning=FALSE, include=FALSE}
+model_dia <- hp_dat %>%
+  mutate(
+    res = residuals(model, type = "pearson", scaled = TRUE), 
+    fit = fitted(model)
+  ) %>%
+  filter(!is.na(res)) 
+```
+
+A model diagnostics is used to assure that the results of the model is to be trusted. Following assumptions need to be evaluated for a model with repeated measurements: 
+
+#### 1. The individual trajectories must reflect the mean trajectory of the group. The random subject effect is assumed to be additive to the systematic effect.
+
+Already been evaluated to be satisfyingly followed previously... 
+
+#### 2. The mean value of the outcome must be a linear function of the explanatory variables.
+
+This is satisfied because two categories are included as explanatory variables and their interaction; e.g. time and physical status. 
+
+#### 3. The residuals must be independent across different individuals. Once the random effects are accounted for, the error terms must not contain further structural information. {.tabset .tabset-fade}
+
+##### Homogeneity of Variance 
+
+```{r Homogeneity, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# FITTED AND RESIDUALS
+#===================================================
+diag_data <- data.frame(
+  Fitted    = fitted(model),
+  Residuals = residuals(model, type = "response")
+) |>  
+  mutate(Std_Res_Sqrt = sqrt(abs(Residuals / sd(Residuals))))
+
+#===================================================
+# PLOT: Homogeneity of Variance
+#===================================================
+ggplot(diag_data, aes(x = Fitted, y = Std_Res_Sqrt)) +
+  geom_point(color = blue, alpha = 0.7, size = size_str) +
+  geom_smooth(method = "loess", color = apple, linewidth = linewidth_str, 
+              se = TRUE, fill = stone, alpha = 0.2) +
+  labs(
+    title = "Figure A: Homogeneity of Variance",
+    x = "Fitted values",
+    y = expression(sqrt(paste("|Std. residuals|")))
+  ) +
+    plot_annotation(caption = "Dataset: hp.csv")
+```
+
+**INTERPRETATION**
+
+When evaluating the homogeneity of variance, it becomes clear that the reference line is not perfectly horizontal. The figure indicates a slight degree of heteroscedasticity, particularly at the higher extreme end where the fitted values exceed 1100, as well as a minor fluctuation around 800. However, for the majority of the fitted values (between 600 and 1100), the variance remains relatively stable, meaning the assumption is sufficiently met for the overall model.
+
+##### Normality of Residuals
+```{r normality, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# PLOT: Normality of Residuals
+#===================================================
+ggplot(diag_data, aes(x = Residuals)) +
+  geom_density(fill = blue, alpha = 0.2, color = NA,) +
+  stat_function(
+    fun = dnorm, 
+    args = list(mean = mean(diag_data$Residuals), 
+                sd = sd(diag_data$Residuals)),
+    color = apple, linewidth = linewidth_str
+  ) +
+  labs(
+    title = "Figure B: Normality of Residuals",
+    x = "Residuals",
+    y = "Density"
+  ) +
+    plot_annotation(caption = "Dataset: hp.csv")
+
+```
+
+**INTERPRETATION**
+
+When evaluating Figure B, it is clear that the model's actual residuals (blue area) do not appear to have any right or left skewness around x = 0. Furthermore, the area overlaps almost completely with the green reference line (the theoretical normal distribution) without any obvious outliers. Therefore, the residuals are evaluated to be normally distributed.
+
+
+##### Check of independence
+```{r indenpendence, echo=FALSE, message=FALSE, warning=FALSE}
+plot_data <- hp_dat %>% 
+  mutate(residuals = residuals(model, type = "response"))
+
+ggplot(plot_data, aes(x = time, y = residuals, group = id)) +
+  geom_line(alpha = 0.3, linewidth = linewidth_str) +
+  facet_wrap(~ physical) +
+  labs(title = "Figure C: Conditional residuals across time and groups",
+       x     = "Physical status",
+       y     = "Conditional Residuals") +
+    plot_annotation(caption = "Dataset: hp.csv")
+```
+
+**INTERPRETATION**
+
+When evaluating Figure C, it is clear that the assumption of independent residuals over time is violated. Instead of showing a random, chaotic web of lines around zero, the individual residual trajectories exhibit a highly systematic X-shaped pattern across both physical status groups. This indicates a strong negative intra-individual correlation in the error terms between day and night.
+
+The presence of this structural information suggests that a random-intercept-only model is insufficient, as it fails to capture the individual variability in trajectories over time. To fully satisfy the independence assumption, a model incorporating random slopes would be required.
+
+#### 4. The residuals must follow the same distribution for all individuals, including having a mean of zero and homogeneous variance (homoscedasticity).
+
+While the independence assumption (Assumption 3) was violated due to the missing random slopes, we proceed to evaluate Assumption 4 regarding the distribution, mean, and homogeneity of the residuals to fully assess the model's behavior.
+
+This is done by constructing three different plots for the residuals against (1) the fitted values, (2) measurement time-points, and (3) grouping. 
+
+#### {.tabset .tabset-fade}
+##### Residuals vs Fitted
+```{r homoscedasticity, echo=FALSE, warning=FALSE, message=FALSE}
+p1 <- ggplot(model_dia, aes(x = fit, y = res)) +
+  geom_point(alpha = 0.7, size = size_str) +
+  geom_hline(yintercept = 0, 
+             color = blue, linetype = "dashed",  linewidth = linewidth_str) +
+  labs(title = "Figure A: Residuals vs Fitted",
+       x = "Fitted values", 
+       y = "Pearson residuals") +
+    plot_annotation(caption = "Dataset: hp.csv")
+
+    p1_final <- ggplotly(p1)
+    p1_final
+```
+
+**INTERPRETATION**
+
+Visual inspection shows a random scatter of points evenly distributed around the horizontal reference line (\(y = 0\)). There is no clear systematic pattern, such as a funnel or trumpet shape, indicating that the variance of the residuals remains relatively constant across all predicted values.
+
+Consequently, the assumption of homoscedasticity is considered satisfied.
+
+##### Residuals Distributed by Measurement Timepoints
+```{r homoscedasticity1, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggbeeswarm)
+
+p <- ggplot(model_dia,
+            aes(x = time, y = res)) +
+  geom_quasirandom(width = 0.2, alpha = 0.7, size = size_str) + 
+  geom_hline(yintercept = 0, linetype = "dashed", 
+             color = blue, linewidth = linewidth_str) + 
+  labs(
+    title = "Figure B: Residuals Distributed by Measurement Timepoints",
+    x = "Measurement Timepoint (Test)",
+    y = "Pearson Residuals") +
+    plot_annotation(caption = "Dataset: hp.csv")
+
+p_final <- ggplotly(p)
+p_final
+```
+ 
+**INTERPRETATION**
+
+Across the two measurement times, the residuals are symmetrically clustered around the dashed reference line (\(y = 0\)), confirming that the mean of the residuals is approximately zero at each timepoint. Furthermore, the vertical dispersion of the data points remains highly consistent across the timeline, demonstrating that variance does not systematically change over time
+ 
+##### Residuals Distributed by Grouping
+```{r homoscedasticity2, echo=FALSE, warning=FALSE, message=FALSE}
+p <- ggplot(model_dia, 
+            aes(x = physical, y = res)) + 
+  geom_quasirandom(width = 0.2, alpha = 0.7, size = size_str) + 
+  geom_hline(yintercept = 0, linetype = "dashed", 
+             color = blue, linewidth = linewidth_str) + 
+  labs(
+    title = "Figure C: Residuals Distributed by Grouping",
+    x = "Physical status",
+    y = "Pearson Residuals"
+  ) +
+    plot_annotation(caption = "Dataset: hp.csv") 
+
+p_final <- ggplotly(p)
+p_final
+```
+ 
+**INTERPRETATION**
+
+When broken down by physical status, the residuals display a slight difference in visual pattern. The passive group exhibits a more symmetric, diamond-like shape centered tightly around \(y = 0\), whereas the active group appears more evenly dispersed throughout the vertical range. 
+
+However, because the total vertical spread is comparable between the two groups, the assumption of equal variance across physical status groups is still considered acceptable
+
+#
+
+**In conclusion:**
+Together they show that although the model failed regarding independence (Assumption 3), the requirements for homogeneity of variance and a mean of zero are well met across both time and groups.
+
+
+#### 5. The residuals must follow a normal distribution.
+
+The evaluation of the assumption is going to be based on a Q-Q plot of Residuals 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Theoretical quadrans 
+model_dia_qq <- model_dia %>%
+  arrange(res) %>%
+  mutate(theoretical = qnorm(ppoints(n())))
+
+p <- ggplot(model_dia_qq, aes(x = theoretical, y = res)) +
+  geom_smooth(method = "lm", formula = y ~ x, 
+              color = blue, linetype = "dashed", se = FALSE, linewidth = linewidth_str) +
+  geom_point(size = size_str, alpha = 0.7) +
+  labs(
+    title = "QQ-plot of Residuals",
+    x = "Theoretical Quantiles",
+    y = "Residuals"
+  ) +
+    plot_annotation(caption = "Dataset: hp.csv") 
+
+p_final <- ggplotly(p)
+p_final
+```
+
+**INTERPRETATION**
+
+The residuals are clearly following a normal distribution, as the data points are closely placed along the blue reference line. This alignment is slightly less prominent at the extreme lower and upper tails, which is to be expected in empirical data. **Therefore, the residuals are evaluated to be normally distributed.**
+
+#### 6. The random effects must be independent across individuals.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+random_effects <- as.data.frame(ranef(model)) %>% 
+  filter(grpvar == "id")
+
+ggplot(random_effects, aes(x = reorder(grp, condval), y = condval)) +
+  geom_point(size = size_str) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = blue, linewidth = linewidth_str) +
+  labs(
+    title = "Check of Random Effects Independence",
+    x = "Individual ID (ordered by intercept value)",
+    y = "Estimated Random Intercept (BLUP)"
+  ) +
+  theme(axis.text.x = element_blank()) +
+    plot_annotation(caption = "Dataset: hp.csv") 
+```
+
+**INTERPRETATION**
+
+Visual inspection of the ordered random intercepts (BLUPs) shows a smooth, continuous, S-shaped curve symmetrically distributed around the reference line (\(y = 0\)). There are no sudden shifts, steps, or distinct clusterings among the individual data points, indicating that the subjects vary continuously and naturally. Combined with the independent recruitment process in the experimental design, this lack of structural grouping confirms that the random effects are independent across individuals and can be considered independent draws from the population.
+
+
+#### 7. The random effects must follow the same distribution for all individuals, including having a mean of zero and homogeneous variance.
+
+To evaluate this assumption a boxplot is constructed for both physical activity groups agains the estimated random effect, also called the Best Linear Unbiased Predictors (BLUPs). Here two specific elements are going to be evaluated; (1) if mean = 0, and (2) if the variance is homogeneous between the two groups. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+blup_data_group <- hp_dat %>% 
+  group_by(id) %>% 
+  summarize(physical = first(physical)) %>% 
+  mutate(blup = ranef(model, drop = TRUE)$id)
+
+ggplot(blup_data_group, aes(x = physical, y = blup)) +
+  geom_boxplot(width = 0.4, outlier.shape = NA) +
+  geom_hline(yintercept = 0, linetype = "dashed", 
+             color = blue, linewidth = linewidth_str) +
+  labs(
+    title = "Random Intercepts across Experimental Groups",
+    x = "Experimental Group",
+    y = "Estimated Random Intercept (BLUP)"
+  ) +
+    plot_annotation(caption = "Dataset: hp.csv") 
+```
+
+**INTERPRETATION**
+
+The dashed reference line represents the theoretical mean of zero. Visually, the medians for both groups are positioned very close to \(y = 0\), confirming that the random effects are correctly centered around zero regardless of grouping. 
+
+Regarding homogeneity of variance, the active group exhibits a slightly wider vertical dispersion (IQR and whiskers) compared to the passive group, indicating marginally higher inter-individual variability in baseline heart periods among active subjects. However, due to the substantial overlap between the two distributions, the assumption of equal variance and distribution of random effects across groups is considered acceptably satisfied.
+
+
+#### 8. Normality of Random Effects: The individual-specific deviations (the random intercepts) follow a normal distribution around zero.
+
+To evaluate whether the individual-specific deviations (the random intercepts) follow a normal distribution around zero, a Quantile-Quantile (QQ) plot of the Best Linear Unbiased Predictors (BLUPs) was examined.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+blup_data <- tibble(blup = ranef(model, drop = TRUE)$id) %>% 
+  arrange(blup) %>% 
+  mutate(theoretical = qnorm(ppoints(n())))
+
+p <- ggplot(blup_data, aes(x = theoretical, y = blup)) +
+  geom_smooth(method = "lm", formula = y ~ x, 
+              color = blue, linetype = "dashed", se = FALSE, linewidth = linewidth_str) +
+  geom_point(size = size_str, alpha = 0.7) +
+  labs(
+    title = "QQ-plot of Random Effects",
+    x = "Theoretical Quantiles",
+    y = "BLUP"
+  ) 
+p_final <- ggplotly(p)
+p_final
+```
+
+**INTERPRETATION**
+
+The figure above shows the QQ-plot of the estimated random effects (BLUPs) to evaluate Assumption 8. In the central region, the data points follow the dashed reference line closely, indicating that the baseline deviations for the majority of individuals are normally distributed. However, a distinct deviation is observed in the upper right tail, where the points drift above the line. This reveals a heavy right tail (positive skewness), meaning a few individuals exhibit exceptionally high baseline heart periods. **Overall, the normality assumption for the random effects is considered partially satisfied, with minor skewness in the extremes.**
+ 
+#### The overall conclusion 
+
+In summary, the comprehensive evaluation of the model assumptions (Assumptions 1–8) reveals a mixed but generally robust diagnostic performance. 
+
+The classical assumptions regarding the model's error terms are highly satisfied; the residuals exhibit a mean of approximately zero, acceptable homogeneity of variance across time-points and groups (Assumption 4), and an almost ideal normal distribution (Assumption 5). Furthermore, the experimental design and subsequent testing confirm that the random effects are independent across different individuals (Assumption 6) and share a comparable distribution between the active and passive groups (Assumption 7).
+
+However, two primary limitations must be noted. First, the systematic hourglass pattern in the individual residual trajectories over time (Assumption 3) indicates a violation of intra-individual independence, suggesting that the model lacks random slopes to capture varying individual trends from day to night. Second, the random effects display a heavy upper tail (Assumption 8), indicating slight right-skewness in baseline levels.
+
+Given the large sample size (\(n = 99\)) and the near-perfect normality of the residuals, linear mixed models are generally robust against these types of deviations. Consequently, while a random-slope architecture could refine the model further, **the current random-intercept framework is considered sufficiently valid and reliable for interpreting the fixed effects and the interaction between time and physical status.**
+
+
+
+
+
+
+
+
+
+
