@@ -1,0 +1,362 @@
+---
+title: "TASK 2 (dataset: agreement.csv)"
+author: "Amanda Wittendorf"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Pre-setting_plots, message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+
+#===================================================
+# THEME
+#===================================================
+standard_tema <- theme_minimal(base_size = 11, base_family = "sans") + 
+  theme(
+    plot.title = element_text(face  = "bold", 
+                              size  = rel(1.2), 
+                              color = "#333333"), 
+    plot.subtitle = element_text(face  = "italic", 
+                                 size  = rel(0.95), 
+                                 color = "#555555"), 
+    axis.title = element_text(size = rel(0.9)), 
+    axis.text = element_text(size = rel(0.85)), 
+    legend.position = "bottom"
+  )
+
+theme_set(standard_tema)
+
+#===================================================
+# COLORS 
+#===================================================
+mint      <- "#66C2A5"
+koral     <- "#FC8D62"
+pink      <- "#E78AC3"
+blue      <- "#8DA0CB"
+apple     <- "#A6D854"
+yellow    <- "#FFD92F"
+sand      <- "#E5C494"
+stone     <- "#B3B3B3"
+color_pal <- "Set2"
+
+#===================================================
+# SIZE 
+#===================================================
+linewidth_str <- 0.6
+size_str      <- 1.0
+alpha_dot     <- 0.7
+```
+
+## DESCRIPTION ON THE DATASET
+
+Contains information from a study with 233 individuals - more preciously: 
+
+- $\text{blodtsy1}$: First measurement of systolic blood pressure (mmHg)
+
+- $\text{blodtsy2}$: Second measurement of systolic blood pressure (mmHg)
+
+- $\text{vaegt}$: The weight at the measurement of the blood pressure (kg)
+
+- $\text{sex}$: Sex of the individuals (0 = Male / 1 = Female)
+
+- $\text{id}$: The ID-number for each individual
+
+- $\text{selvrapvaegt}$: Self-reported weight (kg)
+
+The dataset is in a wide format. 
+
+```{r load_dataset, message=FALSE, warning=FALSE, include=FALSE}
+library(statistik)
+
+agree <- read_csv("agreement.csv") |> 
+  mutate(sex = factor(sex),
+         sex = fct_recode(sex, "Male" = "0", "Female" = "1")) |> 
+  relocate(id, .before = selvrapvaegt) |> 
+  rename(self_weight = selvrapvaegt,
+         weight      = vaegt,
+         sbp1        = blodtsy1,
+         sbp2        = blodtsy2
+  )
+```
+
+
+## STATISTICAL AGREEMENT
+
+In this section we will evaluate the association between the two weight parameters for each sex. 
+
+Like in the previous task, we will perform the assessment of the agreement between two measurements when the dataset is in a wide format. The assessment is done by constructing and evaluating the following: 
+
+### 1. A scatter plot of the measurements against each other
+
+```{r scatterplot, echo=FALSE, warning=FALSE, message=FALSE}
+library(plotly)
+library(patchwork)
+#-------------------------------
+p1 <- ggplot(aes(x = weight, y = self_weight), data = agree) +
+  geom_abline(slope = 1, intercept = 0, 
+              linewidth = linewidth_str, color = blue) +
+  geom_point(size = size_str, alpha = alpha_dot) +
+  facet_wrap(~ sex) +
+  coord_fixed() +
+  labs(x = "Weight at the blood pressure measurement (kg)", 
+       y = "Self-reported weight (kg)", 
+       title = "Scatter plot of the measurements against each other by genders")
+
+ggplotly(p1)
+```
+
+**INTERPRETATION**
+
+Figure 1 illustrates the scatter plots of self-reported weight against measured weight stratified by gender. For both males and females, a strong linear association is visible, with data points clustering tightly along the identity line across the entire spectrum of weight. However, in both subgroups, a slight majority of points fall below the identity line, visually hinting at a consistent underreporting bias. The overall distribution and range of weights appear slightly higher for females than males in this sample, but the linear agreement structure remains highly consistent between the two genders. 
+
+
+### 2. An analysis of the mean and standard deviation (SD) of the differences and the limits of agreement (LoA)
+
+To formally assess the agreement between the weight methods of measurement, the mean difference (systematic bias) and its corresponding 95% confidence interval (CI) were analysed.
+
+```{r table_DT, message=FALSE, warning=FALSE, include=FALSE}
+library(broom)
+library(DT)
+# ---------------------------
+DT_table <- function(print_set, title_set = NULL, col_names = NULL) {
+  datatable(print_set,
+            options = list(pageLength = 10,
+                         dom        = 't',
+                         ordering   = FALSE,
+                         autoWidth  = TRUE,
+                         columnDefs = list(list(className = 'dt-center',    # Centre 
+                                                targets   = "_all"))),      # All columns need to be centre
+          rownames = FALSE,
+          colnames = col_names,
+          class    = "row-border",
+          caption  = title_set)
+}
+```
+```{r p_value, message=FALSE, warning=FALSE, include=FALSE}
+p_val <- function(.data, p_name) {
+  .data |> 
+    mutate({{p_name}} := case_when(
+      {{p_name}} < 0.001 ~ "< 0.001",
+      is.na({{p_name}})  ~ "",
+      TRUE              ~ as.character(round({{p_name}}, 3))
+    )) |> 
+    mutate(across(where(is.numeric), ~ round(., 2)))
+}
+```
+
+```{r mean_SD, warning=FALSE, message=FALSE, echo=FALSE}
+library(DT)
+#===================================================
+# CALCULATIONS
+#===================================================
+agree <- agree |>
+  mutate(dif = self_weight - weight,
+         avg = (weight + self_weight)/2)
+
+agree_summary <- agree |> 
+  summarise(
+    mean_dif  = mean(dif, na.rm = TRUE),
+    sd_dif    = sd(dif, na.rm = TRUE),
+    n         = n(),
+    se_dif    = sd_dif / sqrt(n),
+    ci_lower  = mean_dif - (1.96 * se_dif),
+    ci_upper  = mean_dif + (1.96 * se_dif),
+    pi_low    = mean_dif - 1.96 * sd_dif,
+    pi_high   = mean_dif + 1.96 * sd_dif,
+    p_value   = 2 * (1 - pt(abs(mean_dif / se_dif), df = n - 1)),
+    .by = sex
+  ) 
+
+#===================================================
+# LAYOUTE 
+#===================================================
+agree_summary |> 
+  select(sex, mean_dif, sd_dif, ci_lower, ci_upper, pi_low, pi_high, p_value) |> 
+  p_val(p_value) |> 
+  DT_table(
+    col_names = c("Sex", "Mean difference (MD)", "Standard deviation (SD)", 
+                  "Lower CI", "Upper CI", "Lower PI", "Upper PI", "P value"),
+    title_set = "Overview of the mean and standard deviation (SD) of the differences (self_weight - weight)"
+  ) |> 
+  formatRound(columns = 2:71, digits = 2)
+```
+
+**INTERPRETATION**
+
+The stratified summary table provides a formal statistical analysis of the mean differences and prediction limits for each gender. 
+
+Both subgroups exhibit a clear and statistically significant systematic bias ($p < 0.001$). Males underreport their weight by an average mean difference (MD) of **-1.90 kg** (95% CI [-There is a m2.41; -1.39]), while females underreport by **-1.75 kg** (95% CI [-2.38; -1.11]). Because the 95% confidence intervals for both genders overlap substantially and exclude zero, the systematic underreporting is highly significant in both groups, with no meaningful difference in bias between males and females. 
+
+Regarding individual-level uncertainty, the random variation is slightly larger for females than males, as reflected by a standard deviation (SD) of **3.24 kg** for females compared to **3.03 kg** for males. This translates into slightly wider Limits of Agreement (Prediction Intervals) for females (**-8.09 kg to 4.60 kg**) than for males (**-7.83 kg to 4.03 kg**), demonstrating a high and comparable level of individual uncertainty across both genders.
+
+### 3. A Bland–Altman plot  {.tabset .tabset-fade}
+
+```{r bland_altman, message=FALSE, warning=FALSE, include=FALSE}
+# Stratifying after gender
+agree_split <- split(agree, agree$sex)
+
+plots <- lapply(names(agree_split), function(kon) {
+  df_kon <- agree_split[[kon]]
+  # Mean
+  gns_dif <- mean(df_kon$dif, na.rm = TRUE)
+  sd_dif  <- sd(df_kon$dif, na.rm = TRUE)
+  n       <- nrow(df_kon)
+  # 95% CI
+  se_gns  <- sd_dif / sqrt(n)
+  ci_lo   <- gns_dif - 1.96 * se_gns
+  ci_hi   <- gns_dif + 1.96 * se_gns
+  # 95% PI 
+  pi_lo   <- gns_dif - 1.96 * sd_dif
+  pi_hi   <- gns_dif + 1.96 * sd_dif
+  
+  #---------------------------------
+  # PLOT
+  p <- ggplot(df_kon, aes(x = avg, y = dif)) +
+    geom_hline(yintercept = 0, color = "black", linewidth = 0.25) +
+    geom_hline(yintercept = gns_dif, 
+               color = koral, linewidth = linewidth_str) +
+    geom_hline(yintercept = ci_lo, 
+               color = koral, linetype = "dashed", linewidth = linewidth_str) +
+    geom_hline(yintercept = ci_hi, 
+               color = koral, linetype = "dashed", linewidth = linewidth_str) +
+    geom_hline(yintercept = pi_lo, 
+               color = blue, linetype = "dashed", linewidth = linewidth_str) +
+    geom_hline(yintercept = pi_hi, 
+               color = blue, linetype = "dashed", linewidth = linewidth_str) +
+    geom_point(size = size_str) +
+    labs(x = "Mean", y = "Difference", title = paste("Bland-Altman plot -", kon))
+  
+  ggplotly(p)
+})
+```
+
+#### Males
+
+```{r bland_male, warning=FALSE, message=FALSE, echo=FALSE}
+plots[[1]] 
+```
+
+#### Female
+
+```{r bland_female, warning=FALSE, message=FALSE, echo=FALSE}
+plots[[2]]
+```
+
+###
+
+**INTERPRETATION**
+
+The stratified Bland-Altman plots confirm the insights from the summary table. The red solid bias lines are positioned below the black zero-reference line at a near-identical level for both groups (-1.90 kg for males vs. -1.75 kg for females), illustrating that the systematic underestimation is stable across genders. 
+
+Furthermore, the vertical spread of the data points is fairly uniform from left to right along the horizontal mean axis for both subgroups. The points form even, rectangular clouds without expanding into a "funnel" or "trumpet" shape, which supports the assumption of homoscedasticity (homogeneity of variance) for both males and females. The proportion of points falling outside the blue dashed Limits of Agreement aligns well with the expected 5% threshold in both panels.
+
+### 4. A quantile plot to assess normal distribution.  {.tabset .tabset-fade}
+
+#### Difference with Standard Reference Line
+
+```{r reference_line, warning=FALSE, echo=FALSE, message=FALSE}
+#===================================================
+# CONSTRUCTING THE LINE 
+#===================================================
+qq_data <- agree |> 
+  reframe(
+    x = qqnorm(dif, plot.it = FALSE)$x,
+    y = qqnorm(dif, plot.it = FALSE)$y,
+    .by = sex
+  )
+slope <- diff(quantile(qq_data$y, c(0.25, 0.75), na.rm = TRUE)) / diff(qnorm(c(0.25, 0.75)))
+intercept <- quantile(qq_data$y, 0.25, na.rm = TRUE) - slope * qnorm(0.25)
+
+#===================================================
+# PLOT 
+#===================================================
+p3 <- ggplot(qq_data, aes(x = x, y = y)) +
+  geom_point(size = size_str) +
+  geom_abline(slope = slope, intercept = intercept, color = blue, linewidth = linewidth_str) +
+  facet_wrap(~ sex) +
+  labs(
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles",
+    title = "Difference with Standard Reference Line"
+  )
+
+ggplotly(p3)
+```
+
+**INTERPRETATION**
+
+The stratified standard and standardized Q-Q plots are utilized to evaluate the normality assumption for the differences within each gender group. 
+
+In the standard Q-Q plots, the data points for both males and females follow the general trajectory of the reference line, though they curve away slightly at the extreme tails, indicating minor instability at the upper and lower edges of the weight differences. 
+
+#### Standardized Differences with Identity Line
+
+```{r standard_diff, warning=FALSE, echo=FALSE, message=FALSE}
+#===================================================
+# CONSTRUCTING THE LINE 
+#===================================================
+qq_data_std <- qq_data |> 
+  mutate(y_std = (y - mean(y, na.rm = TRUE)) / sd(y, na.rm = TRUE))
+
+#===================================================
+# PLOT 
+#===================================================
+p4 <- ggplot(qq_data_std, aes(x = x, y = y_std)) +
+  geom_point(size = size_str) +
+  geom_abline(slope = 1, intercept = 0, color = blue, linewidth = linewidth_str) +
+  facet_wrap(~ sex) +
+  labs(
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles",
+    title = "Standardized Differences with Identity Line"
+  )
+
+ggplotly(p4)
+```
+
+**INTERPRETATION**
+
+This scaling effect is resolved in the standardized Q-Q plots. Once the differences are standardized to a standard normal distribution scale, the data points for both subgroups follow the identity line ($y = x$) very closely across the entire spectrum. The benign horizontal staircase patterns visible in both panels are a natural artifact caused by the discrete nature of the weight data, which is recorded as whole numbers. Overall, the stratified model control confirms that the assumption of a normal distribution is fully satisfied for both genders.
+
+### CONCLUSION
+
+In conclusion, a comprehensive assessment of agreement was conducted to evaluate the validity of self-reported weight compared to actual measured weight, stratifying the analysis by gender. 
+
+The results demonstrate that the phenomenon of underreporting weight is remarkably robust and independent of gender. Both males and females exhibit a statistically significant and clinically relevant systematic bias, underestimating their true weight by **-1.90 kg** and **-1.75 kg**, respectively ($p < 0.001$). On an individual level, both groups display substantial random variation, with 95% of individual differences expected to fall within a wide span of approximately **-8 kg to +4.5 kg** (Limits of Agreement). 
+
+All underlying statistical assumptions—normality of the errors and homoscedasticity—were successfully validated for both subgroups through the stratified Q-Q plots and Bland-Altman charts. Consequently, while self-reported weight is a strong linear predictor of actual weight for both men and women, it is subject to an identical systematic underestimation and high individual uncertainty, rendering the two measurement methods non-interchangeable regardless of gender.
+
+### Evaluation of Agreement and Gender Dependence 
+
+To thoroughly assess whether there is good agreement and if the relationship depends on gender, both the systematic differences (from the Bland-Altman analysis) and the linear correlations were evaluated:
+
+```{r cor_test, echo=FALSE, message=FALSE, warning=FALSE}
+agree |> 
+  nest(data = -sex) |> 
+  mutate(test = map(data, ~ cor.test(~ weight + self_weight, data = .x)),
+         param = map(test, parameters)) |> 
+  unnest(param) |> 
+  select(sex, Parameter1, Parameter2, r, CI_low, CI_high, p) |> 
+  p_val(p) |> 
+
+    DT_table(
+    title_set = "Correlation between actual weight and self-reported weight stratified by gender",
+    col_names = c("Sex", "Variable 1", "Variable 2", "Correlation (r)", 
+                  "Lower CI", "Upper CI", "P value")
+  ) |> 
+  formatRound(columns = 4:6, digits = 2)
+```
+
+1. **Is there good agreement?:** Overall, while there is a very strong and highly significant linear correlation between actual and self-reported weight (**$r = 0.94$ for males** and **$r = 0.95$ for females**, $p < 0.001$), this does **not** equal ideal clinical agreement. The high correlation simply means that heavier individuals correctly report being heavier, but it fails to detect the significant systematic bias. On average, both genders significantly underreport their weight (MD = -1.90 kg for males and -1.75 kg for females), combined with a substantial individual prediction uncertainty (SD $\approx$ 3 kg). Therefore, despite the excellent correlation coefficients, the overall agreement is insufficient for precise medical or research purposes.
+
+2. **Does the agreement depend on gender?:** Based on the compiled estimates, the metrics are remarkably consistent, meaning the agreement **does not depend on gender**.
+
+-  **Linear Association:** The correlation coefficients are virtually identical ($r = 0.94$ vs. $r = 0.95$), showing that the linear strength of association is completely stable across subgroups.
+
+- **Mean Differences (Bias):** The systematic underreporting bias is very close (-1.90 kg for males vs. -1.75 kg for females) with widely overlapping 95% confidence intervals, indicating no statistical difference in bias.
+
+- **Standard Deviations (Precision):** The random individual variation around the bias is highly comparable (SD = 3.03 kg for males vs. 3.24 kg for females).
+
+Consequently, the underreporting behavior and the degree of measurement error represent a robust psychological and biological pattern that affects both males and females to a virtually identical degree.
+
+

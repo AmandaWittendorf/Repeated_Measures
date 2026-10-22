@@ -1,0 +1,378 @@
+---
+title: "TASK (dataset: pefr.csv)"
+author: "Amanda Wittendorf"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Pre-setting_plots, message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+
+#===================================================
+# THEME
+#===================================================
+standard_tema <- theme_minimal(base_size = 11, base_family = "sans") + 
+  theme(
+    plot.title = element_text(face  = "bold", 
+                              size  = rel(1.2), 
+                              color = "#333333"), 
+    plot.subtitle = element_text(face  = "italic", 
+                                 size  = rel(0.95), 
+                                 color = "#555555"), 
+    axis.title = element_text(size = rel(0.9)), 
+    axis.text = element_text(size = rel(0.85)), 
+    legend.position = "bottom"
+  )
+
+theme_set(standard_tema)
+
+#===================================================
+# COLORS 
+#===================================================
+mint      <- "#66C2A5"
+koral     <- "#FC8D62"
+pink      <- "#E78AC3"
+blue      <- "#8DA0CB"
+apple     <- "#A6D854"
+yellow    <- "#FFD92F"
+sand      <- "#E5C494"
+stone     <- "#B3B3B3"
+color_pal <- "Set2"
+
+#===================================================
+# SIZE 
+#===================================================
+linewidth_str <- 0.6
+size_str      <- 1.0
+alpha_dot     <- 0.7
+```
+
+## DESCRIPTION ON THE DATASET
+
+Contains information from a 1986 article of with Martin Bland and Douglas Altman whom present methods for comparing clinical measurement methods. The duplicate measurements for each person resulting in four total measurements per individual and was optained from 17 individuals (colleagues and family of Martin Bland) - more preciously: 
+
+- $\text{id}$: The ID-number for each individual
+
+- $\text{meth}$: Two peak flow meters (wright / mini) 
+
+- $\text{y1}$: 1. measurement of peak expiratory flow rate (PEFR)
+
+- $\text{y2}$: 2. measurement of peak expiratory flow rate (PEFR)
+
+The dataset is in a wide format. 
+
+```{r load_dataset, message=FALSE, warning=FALSE, include=FALSE}
+library(statistik)
+
+pefr <- read_csv("pefrBA.csv") |> 
+  mutate(meth   = factor(meth),
+         meth   = fct_recode(meth, "mini-wright" = "mini",
+                                   "wright"      = "wright")) |> 
+  rename(type   = meth,
+         pefr_1 = y1,
+         pefr_2 = y2)
+```
+
+To perform following plot the dataset needs to be in a long format: 
+```{r long_format, echo=FALSE, message=FALSE, warning=FALSE}
+library(DT)
+#===================================================
+# LONG FORMAT
+#===================================================
+pefr_L <- pivot_longer(pefr,
+                       cols = starts_with("pefr"), 
+                       names_to = c(".value", "timepoint"),
+                       names_sep = "_")   
+
+pefr_L <- mutate(pefr_L, timepoint = as.numeric(timepoint))
+
+#===================================================
+# OVERVIEW TABLE 
+#===================================================
+pefr_L |> 
+  as_tibble() |> 
+  datatable(
+    caption = "Overview of the dataset (long format)",
+    rownames = FALSE,           # Remove row-number 
+    class = "row-border", 
+    options = list( 
+      autoWidth = TRUE)) 
+```
+
+To evaluate how the repeated measurement per method are for each subject in the dataset a faceted dot plot is constructed: 
+
+```{r faceted_dot_plot, echo=FALSE, warning=FALSE, message=FALSE}
+library(plotly)
+# ---------------------------------
+p1 <- ggplot(pefr_L, 
+             aes(x = interaction(type, id, sep = " "), y = pefr, col = type)) + 
+  geom_point(size = 2, position = position_dodge(width = 0.4)) +
+  facet_wrap(~ id, 
+             scales = "free_x") +
+  scale_color_brewer(palette = color_pal) +
+  labs(x = "ID", 
+       y = "Peak expiratory flow rate (PEFR)", 
+       col = "Methods of measurement", 
+       title = "Figure 1: Overview of the dataset by ID and PEFR") +
+  scale_x_discrete(breaks = NULL) 
+
+ggplotly(p1)
+```
+
+**Between-subject variation:**
+This is evaluate by looking at the variation in the data point between individuals.It is observed that the data points varies from subject to subject in which some (e.g. ID 1, 3, and 6) has a high PEFR while others (e.g. ID 8, 13 and 15) has low PEFR no matter method of measurement. This difference between subjects are a positive thing when comparing methods because is gives a broad inside in the variance. 
+
+**Between measurement variation:**
+Here the comparison is between the methods of measurements (green = mini-wright and pink = wright) for each ID-number/subjects. The same variation is seen like above some having a higher PEFR measured with mini-wright compared to wright (e.g. ID 1, 5, 15) while others have the opposed (e.g. ID 8, 12 and 16). This variance between methods tells us, that *there is a negligible reasoning for suspecting systematic bias*.  
+ 
+**Repeatability:**
+Because each individual is measure two times with each method of measurement idealy only one per measurement should be observed in the plot. However, for some subjects more than two dots can be observed (e.g. ID 4, 7, and 13). This vertical disposition is telling of measurement errors. 
+
+-----------------------
+
+# STATISTICAL AGREEMENT 
+
+To assess the agreement between the duplicate measurements for each of the two measurement methods individually following 8 parts need to be evaluated: 
+
+### 1. A scatter plot of the measurements against each other
+
+```{r scatter, echo=FALSE, warning=FALSE, message=FALSE}
+p2 <- ggplot(aes(x = pefr_1, y = pefr_2), data = pefr) +
+      geom_abline(slope = 1, intercept = 0, 
+                  color = blue, linewidth = linewidth_str) +
+      geom_point(size = 2, alpha = alpha_dot) +
+      coord_fixed() +
+      facet_wrap(~ type) +
+      labs(x     = "1. measurement of PEFR", 
+           y     = "2. measurement of PEFR",
+           title = "A scatter plot of the measurements against each other") 
+
+ggplotly(p2)
+```
+
+**INTERPRETATION**
+
+When evaluating the two methods side by side it becomes clear that there is a difference between the two; the method, mini-wright, has almost a perfect agreement with the blue reference line (\(y = x\)) by the way the dots equal placement under and over the line. However, for the methods, wright, there is a tendency for the dots to be placed under the reference line (\(y = x\)). Therefore a systematic bias could be present for this method  displaced against the first measurement, meaning a higher PEFR value is found here. 
+
+The random variation is evaluated by the way the data points follows the linear reference line. When evaluating the method mini-wright a outline is found approximately at the middle of the reference line (\(x = 400\)). This indicate a possiblity for lower precion for the method mini-wright compared to the method wright. 
+
+
+### 2. An analysis of the mean and standard deviation (SD) of the differences and the limits of agreement (LoA)
+
+To formally assess the agreement between the two methods of measurements, the mean difference, which is telling for systematic bias, and its corresponding 95%-CI is calculated and analysed.
+
+```{r mean_SD, warning=FALSE, message=FALSE, echo=FALSE}
+library(DT)
+
+#===================================================
+# CALCULATIONS
+#===================================================
+pefr <- pefr |>
+  mutate(dif =  pefr_2 - pefr_1,
+         avg = (pefr_1 + pefr_2)/2)
+
+pefr_summary <- pefr |> 
+  summarise(
+    mean_dif  = mean(dif, na.rm = TRUE),
+    sd_dif    = sd(dif, na.rm = TRUE),
+    n         = n(),
+    se_dif    = sd_dif / sqrt(n),
+    ci_lower  = mean_dif - (1.96 * se_dif),
+    ci_upper  = mean_dif + (1.96 * se_dif),
+    pi_low    = mean_dif - 1.96 * sd_dif,
+    pi_high   = mean_dif + 1.96 * sd_dif,
+    p_value   = 2 * (1 - pt(abs(mean_dif / se_dif), df = n - 1)),
+    .by = type
+  ) 
+
+#===================================================
+# LAYOUTE 
+#===================================================
+pefr_summary |> 
+  select(type, mean_dif, sd_dif, ci_lower, ci_upper, pi_low, pi_high, p_value) |> 
+  datatable(
+    options = list(pageLength = 10,
+                   autoWidth = TRUE, 
+                   ordering = FALSE,
+                   dom = 't',
+                   columnDefs = list(list(className = 'dt-center', targets = "_all"))), 
+    colnames = c("Measurement type", "Mean difference (MD)", 
+                 "Standard deviation (SD)", 
+                 "Lower CI", "Upper CI", "Lower PI", "Upper PI", "P value"),
+    caption = "Overview of the mean and standard deviation (SD) of the differences (pefr_2 - pefr_1)",
+    class = "row-border",
+    rownames = FALSE
+  ) |> 
+  formatRound(columns = 2:7, digits = 2) |>
+  formatSignif(columns = 8, digits = 3)  
+```
+
+**INTERPRETATION**
+
+The table above shows the mean difference (MD) between the PEFR-values stratified after the methods of measurement, ergo mini-wright and wright. 
+
+Even though there is a difference between MD of the two methods, by mini-wright having a higher PEFR value measured the second time (\(MD = 2.88\)) and wright at the first measurement (\(MD = -4.94\)), none of these are significant (\(p > 0,05\)). 
+
+In addition, the standard deviation (SD) is high for booth of the measurement types (\(SD = 28.87 vs. 21.72\)). This means, that the measurements per method have a tendency to fluctuate for each subject. This correlates with the high intervals of the Limits of Agreement (LoA) - especially for the method mini-wright (\(PI: -53.71; 59.47\)). 
+
+### 3. A Bland–Altman plot  {.tabset .tabset-fade}
+
+To easier understand these extreme values a Bland–Altman plot is constructed
+
+```{r bland_altman, message=FALSE, warning=FALSE, include=FALSE}
+# Stratifying after gender
+pefr_split <- split(pefr, pefr$type)
+
+plots <- lapply(names(pefr_split), function(method) {
+  df_method <- pefr_split[[method]]
+  # Mean
+  gns_dif <- mean(df_method$dif, na.rm = TRUE)
+  sd_dif  <- sd(df_method$dif, na.rm = TRUE)
+  n       <- nrow(df_method)
+  # 95% CI
+  se_gns  <- sd_dif / sqrt(n)
+  ci_lo   <- gns_dif - 1.96 * se_gns
+  ci_hi   <- gns_dif + 1.96 * se_gns
+  # 95% PI 
+  pi_lo   <- gns_dif - 1.96 * sd_dif
+  pi_hi   <- gns_dif + 1.96 * sd_dif
+  
+  #---------------------------------
+  # PLOT
+  p <- ggplot(df_method, aes(x = avg, y = dif)) +
+    geom_hline(yintercept = 0, color = "black", linewidth = 0.25) +
+    geom_hline(yintercept = gns_dif, 
+               color = koral, linewidth = linewidth_str) +
+    geom_hline(yintercept = ci_lo, 
+               color = koral, linetype = "dashed", linewidth = linewidth_str) +
+    geom_hline(yintercept = ci_hi, 
+               color = koral, linetype = "dashed", linewidth = linewidth_str) +
+    geom_hline(yintercept = pi_lo, 
+               color = blue, linetype = "dashed", linewidth = linewidth_str) +
+    geom_hline(yintercept = pi_hi, 
+               color = blue, linetype = "dashed", linewidth = linewidth_str) +
+    geom_point(size = size_str) +
+    labs(x = "Mean of measurements", 
+         y = "Difference (Measurement 2 - 1)", 
+         title = paste("Bland-Altman Plot of Duplicate Measurement")
+         )
+  
+  ggplotly(p)
+})
+```
+
+####  Mini-wright
+
+```{r bland_male, warning=FALSE, message=FALSE, echo=FALSE}
+plots[[1]] 
+```
+
+**INTERPRETATION**
+
+The mean difference (MD) is shown in the plot as the solid pink line, with its corresponding 95% confidence interval represented by the dotted pink lines. Because the black reference line (\(y = 0\)) is contained within this 95% confidence interval, the mini-wright method is evaluated to have no statistically significant systematic bias between the two time-points of measurement.
+
+However, the Limits of Agreement (LoA), shown as the dashed blue lines, are very wide. This demonstrates substantial random variation and poor agreement between the replicate PEFR measurements.
+
+The proportional bias is evaluated by inspecting the horizontal distribution of the data points. Aside from a single distinct outlier, the variation appears stable across the range of measurements, suggesting that the data points generally exhibit homoscedasticity rather than a funnel shape. The single outlier observed well above the upper LoA contributes heavily to the wide overall LoA and highlights potential precision issues.
+
+When taking this outlier into consideration, the measurement method exhibits precision issues that cannot be overlooked. These variations make the duplicate measurements somewhat unreliable in this specific case, and it would be highly beneficial to expand the study with a larger sample size than 17 subjects to better assess the true repeatability.
+
+
+#### Wright
+
+```{r bland_female, warning=FALSE, message=FALSE, echo=FALSE}
+plots[[2]]
+```
+
+**INTERPRETATION**
+
+When compared to the plot for the mini-wright method, the mean difference (MD) is here placed below the reference line (\(y = 0\)). However, this does not change the fact that there is no statistically significant systematic bias between the two time-points of measurement, as the reference line is still contained within the 95% confidence interval.
+The same applies to the Limits of Agreement (LoA); they remain very wide, which again demonstrates substantial random variation and poor agreement between the replicate PEFR measurements.
+
+Compared to the other method, this plot shows a different distribution of the data points. Rather than a distinct funnel shape, the wide LoA is primarily driven by multiple prominent outliers in both directions, particularly around the mid-range of the measurements (between 400 and 500). Because more outliers are visible here compared to the mini-wright method, the precision issues are more pronounced across the intermediate measurement range.
+Consequently, a similar conclusion is drawn for this method as for the first one: the substantial variation between duplicates makes the measurements somewhat unreliable, with the issues being slightly more prominent here due to the multiple extreme outliers.
+
+
+### 4. A quantile plot to assess normal distribution.  {.tabset .tabset-fade}
+
+To assess whether we can trust the Limits of Agreement (LoA), the difference between the measurements follows a normal distribution is evaluated.
+
+#### Difference with Standard Reference Line
+```{r reference_line, warning=FALSE, echo=FALSE, message=FALSE}
+#===================================================
+# CONSTRUCTING THE LINE 
+#===================================================
+qq_data <- pefr |> 
+  reframe(
+    x = qqnorm(dif, plot.it = FALSE)$x,
+    y = qqnorm(dif, plot.it = FALSE)$y,
+    .by = type
+  )
+slope <- diff(quantile(qq_data$y, c(0.25, 0.75), na.rm = TRUE)) / diff(qnorm(c(0.25, 0.75)))
+intercept <- quantile(qq_data$y, 0.25, na.rm = TRUE) - slope * qnorm(0.25)
+
+#===================================================
+# PLOT 
+#===================================================
+p3 <- ggplot(qq_data, aes(x = x, y = y)) +
+  geom_point(size = size_str) +
+  geom_abline(slope = slope, intercept = intercept, color = blue, linewidth = linewidth_str) +
+  facet_wrap(~ type) +
+  labs(
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles",
+    title = "Difference with Standard Reference Line"
+  )
+
+ggplotly(p3)
+```
+
+**INTERPRETATION**
+
+When evaluating the normal distribution against the blue standard reference line it is observed that the data points for the method, mini-wright, follows the line closer than the other method, wright. This is mostly true around x = 0 which is telling for the central part of the data is normal distributed. 
+
+When looking at the tails it becomes clear that there for the method mini-wright is an outlier at x = 2 while the method wright both have a outlier at the same place as well as a heavy tail at x = -2. This is telling that there is more extreme variables than a perfect normal distribution. 
+
+#### Standardized Differences with Identity Line
+
+```{r standard_diff, warning=FALSE, echo=FALSE, message=FALSE}
+#===================================================
+# CONSTRUCTING THE LINE 
+#===================================================
+qq_data_std <- qq_data |> 
+  mutate(y_std = (y - mean(y, na.rm = TRUE)) / sd(y, na.rm = TRUE))
+
+#===================================================
+# PLOT 
+#===================================================
+p4 <- ggplot(qq_data_std, aes(x = x, y = y_std)) +
+  geom_point(size = size_str) +
+  geom_abline(slope = 1, intercept = 0, color = blue, linewidth = linewidth_str) +
+  facet_wrap(~ type) +
+  labs(
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles",
+    title = "Standardized Differences with Identity Line"
+  )
+
+ggplotly(p4)
+```
+
+**INTERPRETATION**
+
+The second plot displays the standardized differences against the identity line (\(y = x\)). By transforming the differences into Z-scores, this plot allows for a direct quantification of the magnitude of the outliers. For the mini-wright method, it becomes explicitly clear that the upper outlier is extreme, reaching a Z-score of nearly 4 (\(z \approx 3.8\)). In a perfect normal distribution, an observation this far from the mean is exceptionally rare. For the original wright method, the standardized plot confirms that the extreme values at both tails deviate by approximately \(\pm 2\) standard deviations, while the middle section exhibits a slight S-shaped deviation from the line.
+
+###
+
+#### Combined Conclusion on Normality
+
+In conclusion, both types of Q-Q plots reveal that while the central data points generally follow the reference lines—indicating that the core of the data is reasonably normally distributed—the assumption of perfect normality is violated due to the heavy tails and severe outliers.
+
+Because the Bland-Altman Limits of Agreement (LoA) are calculated based on the assumption of normally distributed differences (\(\pm 1.96 \cdot SD\)), these extreme values (especially the \(\sim 4\) SD outlier in the mini-wright data) artificially inflate the standard deviation. As a result, the calculated LoA boundaries become wider and less reliable than they would be in a cleanly distributed dataset. Given the small sample size (\(n = 17\)), these individual extreme measurements have a disproportionate impact, meaning the clinical limits of agreement must be interpreted with caution.
+
+----------------------
+
+
+
+
+

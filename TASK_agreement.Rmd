@@ -1,0 +1,726 @@
+---
+title: "TASK 1 (dataset: agreement.csv)"
+author: "Amanda Wittendorf"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Pre-setting_plots, message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+
+#===================================================
+# THEME
+#===================================================
+standard_tema <- theme_minimal(base_size = 11, base_family = "sans") + 
+  theme(
+    plot.title = element_text(face  = "bold", 
+                              size  = rel(1.2), 
+                              color = "#333333"), 
+    plot.subtitle = element_text(face  = "italic", 
+                                 size  = rel(0.95), 
+                                 color = "#555555"), 
+    axis.title = element_text(size = rel(0.9)), 
+    axis.text = element_text(size = rel(0.85)), 
+    legend.position = "bottom"
+  )
+
+theme_set(standard_tema)
+
+#===================================================
+# COLORS 
+#===================================================
+mint      <- "#66C2A5"
+koral     <- "#FC8D62"
+pink      <- "#E78AC3"
+blue      <- "#8DA0CB"
+apple     <- "#A6D854"
+yellow    <- "#FFD92F"
+sand      <- "#E5C494"
+stone     <- "#B3B3B3"
+color_pal <- "Set2"
+
+#===================================================
+# SIZE 
+#===================================================
+linewidth_str <- 0.6
+size_str      <- 1.0
+alpha_dot     <- 0.7
+```
+
+## DESCRIPTION ON THE DATASET
+
+Contains information from a study with 233 individuals - more preciously: 
+
+- $\text{blodtsy1}$: First measurement of systolic blood pressure (mmHg)
+
+- $\text{blodtsy2}$: Second measurement of systolic blood pressure (mmHg)
+
+- $\text{vaegt}$: The weight at the measurement of the blood pressure (kg)
+
+- $\text{sex}$: Sex of the individuals (0 = Male / 1 = Female)
+
+- $\text{id}$: The ID-number for each individual
+
+- $\text{selvrapvaegt}$: Self-reported weight (kg)
+
+The dataset is in a wide format. 
+
+```{r load_dataset, message=FALSE, warning=FALSE, include=FALSE}
+library(statistik)
+
+agree <- read_csv("agreement.csv") |> 
+  mutate(sex = factor(sex),
+         sex = fct_recode(sex, "Male" = "0", "Female" = "1")) |> 
+  relocate(id, .before = selvrapvaegt) |> 
+  rename(self_weight = selvrapvaegt,
+         weight      = vaegt,
+         sbp1        = blodtsy1,
+         sbp2        = blodtsy2
+  )
+```
+
+
+## STATISTICAL AGREEMENT
+
+In this section we will evaluate the systolic blood pressure measurements. 
+
+It is easier to perform the assessment of the agreement between two measurements when the dataset is in a wide format. The assessment is done by constructing and evaluating the following: 
+
+### 1. A scatter plot of the measurements against each other
+
+```{r scatterplot, echo=FALSE, warning=FALSE, message=FALSE}
+library(plotly)
+library(patchwork)
+
+p1 <- ggplot(aes(x = sbp1, y = sbp2), data = agree) +
+  geom_abline(slope = 1, intercept = 0, 
+              linewidth = linewidth_str, color = blue) +
+  geom_point(size = size_str, alpha = alpha_dot) +
+  coord_fixed() +
+  labs(x = "1. Blood pressure measurement", 
+       y = "2. Blood pressure measurement", 
+       title = "Figur A")
+
+ggplotly(p1)
+```
+
+**INTERPRETATION**
+
+When evaluating the placement of the dots in relation to the blue line of perfect agreement (\(y = x\)), it is clear that they are distributed evenly above and below this line. This tells us that *there is good agreement with no substantial systematic bias*.
+
+Moreover, the random variation is evaluated by the way the data points cluster around the line. Because the data points follow the line, it indicates that there is a relatively strong linear association between the two measurements of SBP, reflecting a generally high level of precision. *The uniform variation across the entire spectrum therefore supports homoscedasticity*.
+
+
+### 2. An analysis of the mean and standard deviation (SD) of the differences and the limits of agreement (LoA)
+
+To formally assess the agreement between the two blood pressure measurement methods, the mean difference (systematic bias) and its corresponding 95% confidence interval (CI) were analyzed.
+
+```{r mean_SD, warning=FALSE, message=FALSE, echo=FALSE}
+library(DT)
+
+#===================================================
+# CALCULATIONS
+#===================================================
+agree <- agree |>
+  mutate(dif = sbp2 - sbp1,
+         avg = (sbp1 + sbp2)/2)
+
+agree_summary <- agree |> 
+  summarise(
+    mean_dif  = mean(dif, na.rm = TRUE),
+    sd_dif    = sd(dif, na.rm = TRUE),
+    n         = n(),
+    se_dif    = sd_dif / sqrt(n),
+    ci_lower  = mean_dif - (1.96 * se_dif),
+    ci_upper  = mean_dif + (1.96 * se_dif),
+    pi_low    = mean_dif - 1.96 * sd_dif,
+    pi_high   = mean_dif + 1.96 * sd_dif,
+    p_value   = 2 * (1 - pt(abs(mean_dif / se_dif), df = n - 1))
+  ) 
+
+#===================================================
+# LAYOUTE 
+#===================================================
+agree_summary |> 
+  select(mean_dif, sd_dif, ci_lower, ci_upper, pi_low, pi_high, p_value) |> 
+  datatable(
+    options = list(pageLength = 10,
+                   autoWidth = TRUE, 
+                   ordering = FALSE,
+                   dom = 't',
+                   columnDefs = list(list(className = 'dt-center', targets = "_all"))), 
+    colnames = c("Mean difference (MD)", 
+                 "Standard deviation (SD)", 
+                 "Lower CI", "Upper CI", "Lower PI", "Upper PI", "P value"),
+    caption = "Overview of the mean and standard deviation (SD) of the differences",
+    class = "row-border",
+    rownames = FALSE
+  ) |> 
+  formatRound(columns = 1:6, digits = 2) |>
+  formatSignif(columns = 7, digits = 3)  
+
+```
+
+**INTERPRETATION**
+
+The estimated MD between the two methods is 0.31 mmHg, which indicates a minimal and clinically negligible systematic bias. The 95% confidence interval ranges from -0.14 to 0.76 mmHg. Because this interval includes the value of 0, it demonstrates that *the slight difference between the measurements is not statistically significant*.
+
+This conclusion is further supported by the parred t-test, which yields a p-value of 0.182 (\(p > 0.05\)). Consequently, we fail to reject the null hypothesis of no difference, confirming that *there is no evidence of a systematic bias between the two measurement devices*.
+
+However, while there is no systematic error, the random variation between individual measurements is reflected by a standard deviation (SD) of 3.52 mmHg. This random scattering should be evaluated further in a Bland-Altman plot using prediction intervals (Limits of Agreement).
+
+### 3. A Bland–Altman plot
+
+```{r bland_altman, warning=FALSE, message=FALSE, echo=FALSE}
+#===================================================
+# PRE-CALCULATIONS 
+#===================================================
+ttest <- t.test(dif ~ 1, data = agree) |> 
+  parameters()
+
+mean_est <- ttest$Mean
+ci_low <- ttest$CI_low
+ci_high <- ttest$CI_high
+sd_est <- sd(agree$dif)
+pi_low <- mean_est - 1.96*sd_est
+pi_high <- mean_est + 1.96*sd_est
+
+#===================================================
+# PLOT 
+#===================================================
+p2 <- ggplot(aes(x = avg, y = dif), data = agree) +
+  # Mean
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.25) +
+  # 95%-CI
+  geom_hline(yintercept = mean_est, color = koral, linewidth = linewidth_str) +
+  geom_hline(yintercept = ci_low, color = koral,  linetype = "dashed", linewidth = linewidth_str) +
+  geom_hline(yintercept = ci_high, color = koral,  linetype = "dashed", linewidth = linewidth_str) +
+  # 95%-PI
+  geom_hline(yintercept = pi_low, color = blue,  linetype = "dashed", linewidth = linewidth_str) +
+  geom_hline(yintercept = pi_high, color = blue,  linetype = "dashed", linewidth = linewidth_str) +
+  # Data points
+  geom_point(size = size_str) +  
+  labs(x = "Mean", 
+       y = "Difference", 
+       title = "Figure B")
+
+ggplotly(p2)
+```
+
+**INTERPRETATION**
+
+The red lines represent the mean difference and its 95% confidence interval (\(\text{MD} = 0.31\), 95% CI \([-0.14; 0.76]\)), which is located very close to the black reference line (\(y = 0\)). Because the black reference line lies within the confidence interval of the MD, this aligns with the previous conclusion that the difference is not statistically significant. This also indicates that there is no clinically significant systematic bias, meaning one device does not consistently measure higher or lower than the other.
+
+In addition, the blue lines represent the Limits of Agreement (\(\text{LoA} = [-6.59; 7.21]\)). Most of the data points are placed within this interval (expected 95%), clustering relatively close to the center of the plot, which indicates a stable and acceptable random variation.
+
+The vertical spread, and thereby the difference, is fairly uniform regardless of whether the blood pressure is low (90 mmHg) or high (140 mmHg). The data points form an even, rectangular cloud and do not fan out or widen like a "trumpet" toward the right. This confirms that the random variation is independent of the magnitude of the blood pressure, which supports the assumption of homoscedasticity.
+
+
+### 4. A quantile plot to assess normal distribution.  {.tabset .tabset-fade}
+
+#### Difference with Standard Reference Line
+
+```{r reference_line, warning=FALSE, echo=FALSE, message=FALSE}
+#===================================================
+# CONSTRUCTING THE LINE 
+#===================================================
+qq_data <- as.data.frame(qqnorm(agree$dif, plot.it = FALSE))
+
+slope <- diff(quantile(qq_data$y, c(0.25, 0.75))) / diff(qnorm(c(0.25, 0.75)))
+intercept <- quantile(qq_data$y, 0.25) - slope * qnorm(0.25)
+
+#===================================================
+# PLOT 
+#===================================================
+p3 <- ggplot(qq_data, aes(x = x, y = y)) +
+  geom_point(size = size_str) +
+  geom_abline(slope = slope, intercept = intercept, color = blue, linewidth = linewidth_str) +
+  labs(
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles",
+    title = "Figure C"
+  )
+
+ggplotly(p3)
+```
+
+**INTERPRETATION**
+
+In Figure 5, the data points form an awards-oriented, essentially straight line, which indicates that the distribution of the differences is approximately normally distributed. The reason why the blue reference line does not align perfectly with the data points in this first plot is due to the scale of the raw data; the standard deviation of the differences (SD = 3.52) is larger than the standard theoretical scale (SD = 1), causing a steeper vertical variation.
+
+#### Standardized Differences with Identity Line
+
+```{r standard_diff, warning=FALSE, echo=FALSE, message=FALSE}
+p4 <- ggplot(agree, aes(sample = (dif- mean(dif))/sd(dif))) +
+  stat_qq(size = size_str) +
+  geom_abline(slope = 1, intercept = 0,
+              linewidth = linewidth_str, color = blue)  +
+  labs(x     = "Theoretical Quantiles", 
+       y     = "Sample Quantiles", 
+       title = "Figure D")
+
+ggplotly(p4)
+```
+
+**INTERPRETATION**
+
+This scaling issue is resolved in Figure 6, which shows the standardized differences. Once the differences are standardized to the same scale as the theoretical distribution, the data points closely follow the reference line across the entire spectrum. This reference line is known as the Identity Line (\(y = x\)). The slight horizontal staircase patterns are a benign artifact caused by the discrete nature of blood pressure data (recorded as whole integers). Overall, both plots confirm that the assumption of normal distribution is fully satisfied.
+
+### **CONCLUSION**
+
+In conclusion, a comprehensive assessment of agreement was conducted to evaluate the interchangeability of the two blood pressure measurement devices. 
+
+The initial visual inspection via the scatterplot demonstrated a strong linear association with data points evenly distributed around the identity line (\(y = x\)). This was formally confirmed by the analysis of the mean difference, which revealed a minimal and clinically negligible systematic bias of 0.31 mmHg. Because the 95% confidence interval ([-0.14; 0.76]) includes 0, and the paired t-test yielded a non-significant p-value of 0.182, there is no statistical evidence of a systematic error between the two devices.
+
+Regarding random variation, the Bland-Altman plot established that 95% of the differences are expected to fall within the Limits of Agreement ([-6.59; 7.21] mmHg), which represents an acceptable level of precision for clinical blood pressure measurements. Furthermore, all underlying statistical assumptions for the analysis were successfully validated: the uniform spread in the Bland-Altman plot confirmed homoscedasticity, and the standard and standardized Q-Q plots verified that the differences follow a normal distribution. 
+
+Therefore, the two methods demonstrate excellent agreement and can be considered clinically interchangeable.
+
+----------------------------------------
+
+## ANALYSIS OF REPEATED MEASURES FOR SBP-MEASUREMENTS
+
+A standard Bland-Altman analysis and a paired t-test assume that all observations in independent from one another. Because the dataset contains two measurements per individual ($\text{sbp1}$ and $\text{sbp2}$) it makes sense to do a analysis of repeated measurements. The reasoning is that *the assumption of independence is violated because measurements of the same individual is more similar than measurements from different ones*. 
+
+To do so we first need to change the format of the dataset from a wide to a long format: 
+
+```{r long_format, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# LONG FORMAT
+#===================================================
+agree_L <- pivot_longer(agree,
+                        cols = starts_with("sbp"),        # Name
+                        names_to = c(".value", "test_nr"),
+                        names_pattern = "(sbp)(\\d+)")    # Find "blodtsy" and all possible numbers (\\d+)
+
+agree_L <- mutate(agree_L, test_nr = as.numeric(test_nr)) |> 
+  select(id, self_weight, weight, sex, test_nr, sbp) |> 
+  mutate(test_nr = factor(test_nr))
+
+#===================================================
+# OVERVIEW TABLE 
+#===================================================
+agree_L |> 
+  as_tibble() |> 
+  datatable(
+    caption = "Overview of the dataset (long format)",
+    rownames = FALSE,           # Remove row-number 
+    class = "row-border", 
+    options = list( 
+      autoWidth = TRUE)) 
+```
+
+The type of model used in this section is the mixed linear model without any interaction because we want to test if there is a systematic difference between the two measurements of blood pressure (\(test_nr\)). 
+
+**Model**
+$$
+\begin{aligned}
+Y_{ij} = \alpha &+ \beta_1 \cdot [\text{test}_{ij} = 2] \\
+&+ a_i + \varepsilon_{ij}
+\end{aligned}
+$$
+```{r table_DT, message=FALSE, warning=FALSE, include=FALSE}
+library(broom)
+library(DT)
+# ---------------------------
+DT_table <- function(print_set, title_set = NULL) {
+  datatable(print_set,
+            options = list(pageLength = 10,
+                         dom = 't',
+                         ordering = FALSE),
+          rownames = FALSE,
+          class = "row-border",
+          caption = title_set)
+}
+```
+```{r p_value, message=FALSE, warning=FALSE, include=FALSE}
+p_val <- function(.data, p_name) {
+  .data |> 
+    mutate({{p_name}} := case_when(
+      {{p_name}} < 0.001 ~ "< 0.001",
+      is.na({{p_name}})  ~ "",
+      TRUE              ~ as.character(round({{p_name}}, 3))
+    )) |> 
+    mutate(across(where(is.numeric), ~ round(., 2)))
+}
+```
+
+```{r mixed_model, message=FALSE, warning=FALSE, include=FALSE}
+library(lmerTest)
+# ---------------------------
+mixed_model <- lmer(sbp ~ test_nr + (1 | id),
+                    na.action = na.exclude,
+                    data = agree_L)
+```
+
+```{r effects, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# SYSTEMATIC EFFECT
+#===================================================
+fixed_effects <- mixed_model |> 
+  parameters(effects = "fixed", ci_method = "kenward") |> 
+  as.data.frame() |> 
+  select(Parameter, Coefficient, CI_low, CI_high, p) |> 
+  mutate(Type = "Systematic (Fixed)")
+
+#===================================================
+# RANDOM EFFECT
+#===================================================
+random_effects <- mixed_model |> 
+  parameters(effects = "random", ci_method = "profile") |> 
+  as.data.frame() |> 
+  select(Parameter = Group, Coefficient = Coefficient, CI_low, CI_high) |> 
+  mutate(Type = "Random (Variance)", p = NA) 
+
+#===================================================
+# PRINT
+#===================================================
+combined_effects <- bind_rows(fixed_effects, random_effects) |> 
+  mutate(
+    Parameter = case_match(Parameter,
+                           "test_nr2" ~ "Measurement Timepoint (test_nr)",
+                           .default   = Parameter)
+    ) |> 
+  select(Type, Parameter, Coefficient, CI_low, CI_high, p) |> 
+    p_val(p_name = p)
+
+
+DT_table(combined_effects, 
+         title_set = "Overview of Systematic and Random Effects")
+```
+
+**INTERPRETATION**
+
+When evaluating the fixed effects, the intercept estimates the baseline mean systolic blood pressure (SBP) for the study population at the first measurement to be 108.44 mmHg (95% CI [107.16; 109.71], \(p < 0.001\)). The systematic difference between the two measurement timepoints (\(\text{test\_nr}\)) is estimated to be 0.31 mmHg (95% CI [-0.15; 0.76]). Because the 95% confidence interval includes 0, and the p-value is non-significant (\(p = 0.182\)), we conclude that there is no statistically significant systematic change in SBP over time.
+
+Regarding the random effects, the analysis reveals that the between-person variation (\(\text{id}\)) is substantially larger than the within-person variation (\(\text{Residual}\)). The standard deviation between different individuals is 9.57 mmHg (95% CI [8.71; 10.51]), reflecting high biological diversity in baseline blood pressure levels across the population. In contrast, the residual standard deviation within the same individual across measurements is only 2.49 mmHg (95% CI [2.27; 2.73]), indicating a high level of measurement stability and low random noise.
+
+
+### Model diagnostics
+
+To be sure that the above calculations can be trusted, a model diagnostics are conducted. 
+
+```{r predicted_values, message=FALSE, warning=FALSE, include=FALSE}
+modelkon <- mutate(agree_L,
+                   res = residuals(mixed_model, type = "pearson", scaled = TRUE),
+                   fit = fitted(mixed_model))%>%
+  filter(!is.na(res)) 
+```
+
+A model diagnostics is used to assure that the results of the model is to be trusted. Following assumptions need to be evaluated for a model with repeated measurements: 
+
+#### 1. The individual trajectories must reflect the mean trajectory of the group. The random subject effect is assumed to be additive to the systematic effect.
+
+#### Visual Overview of the Dataset {.tabset .tabset-fade}
+
+##### Individual Trajectory Plot
+```{r visual_overview, echo=FALSE, message=FALSE, warning=FALSE}
+library(plotly)
+library(patchwork)
+
+ind_plot <- ggplot(agree_L,
+                   aes(x = test_nr, y = sbp, group = id)) +
+  geom_line(linewidth = linewidth_str) +
+  geom_point(size = size_str) +
+  facet_wrap(~ id) +
+  scale_color_brewer(palette = color_pal) +
+  labs(
+    x = "Measurement time-point",
+    y = "Systolic blood pressure (mmHg)", 
+    title = "Figure A"
+  ) +
+    plot_annotation(caption = "Dataset: agreement.csv") 
+
+ggplotly(ind_plot)
+```
+
+**INTERPRETATION**
+
+Figure A shows a clear paired data structure because no individual in the dataset has missing values and therefore have two data points representing a measurement per time-point. In addition, a mixture of negative, positive and no-trend is observed.  
+
+#### Individual trajectory plot stratified by group
+```{r visual_overview1, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# RANDOMISATION
+#===================================================
+set.seed(123)
+  
+complete_id <- agree_L |> 
+  group_by(id) |> 
+  summarise(n_valid = sum(!is.na(sbp)), .groups = "drop") |> 
+  pull(id)
+
+random_id <- agree_L |> 
+  filter(id %in% complete_id) |> 
+  distinct(id, test_nr) |> 
+  group_by(test_nr) |> 
+  slice_sample(n = 15) |> 
+  pull(id)
+
+plot_data <- agree_L |> 
+  filter(id %in% random_id)
+
+#===================================================
+# PLOT 
+#===================================================
+plot_strat <- ggplot(plot_data,
+                     aes(x = test_nr, y = sbp, group = id)) +
+  geom_line(linewidth = linewidth_str, alpha = 0.5) +
+  geom_point(size = size_str, color = "grey30") +
+    labs(x = "Measurement time-point",
+         y = "Systolic blood pressure (mmHg)", 
+         title = "Figure B") +
+    plot_annotation(caption = "Dataset: agreement.csv") 
+
+ggplotly(plot_strat)
+```
+
+**INTERPRETATION**
+
+Figure B illustrates the individual SBP trajectories for a random sample of 15 individuals to ensure readability. The plot *clearly shows substantial between-subject variation*, as individuals start at widely different baseline levels. However, across the two time-points, the individual trajectories are predominantly parallel and horizontal, with minor random fluctuations. This lack of crossing lines indicates that the random subject effect is additive, meaning a random intercept model without random slopes is appropriate.
+
+#### Mean trajectory plot
+```{r visual_overview2, echo=FALSE, message=FALSE, warning=FALSE}
+summary_data <- agree_L |> 
+  summarise(average = mean(sbp, na.rm = TRUE),
+            .by = test_nr)
+
+mean_plot <- ggplot(summary_data,
+                    aes(x = factor(test_nr), y = average, group = 1)) +
+  geom_line(linewidth = linewidth_str, color = blue) +
+  geom_point(size = size_str, color = blue) +
+  labs(x = "Measurement Timepoint (test_nr)",
+       y = "Mean Systolic Blood Pressure (mmHg)",
+       title = "Figure C: Mean trajectory plot") +
+    plot_annotation(caption = "Dataset: agreement.csv") 
+
+ggplotly(mean_plot)
+```
+
+**INTERPRETATION**
+
+Figure C shows the mean trajectory for the entire study population. The overall mean SBP increases very slightly from 108.44 mmHg at timepoint 1 to 108.75 mmHg at timepoint 2. This minimal change of 0.31 mmHg reflects the non-significant systematic effect found in the model. 
+
+####
+
+**In conclusion**, when comparing the plots, the individual trajectories in Figure B successfully reflect this flat mean trajectory of the group, as most individual lines show either a minimal positive trend or no trend at all. Therefore, the assumption that the individual trajectories reflect the mean trajectory under an additive model structure is fully satisfied.
+
+
+#### 2. The mean value of the outcome must be a linear function of the explanatory variables.
+
+The only exploratory variable in the model is a categorical one with two levels (time-point 1 and 2) which makes the assumption of linearity satisfied. 
+
+#### 3. The residuals must be independent across different individuals. Once the random effects are accounted for, the error terms must not contain further structural information. {.tabset .tabset-fade}
+
+##### Homogeneity of Variance 
+
+```{r Homogeneity, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# FITTED AND RESIDUALS
+#===================================================
+diag_data <- data.frame(
+  Fitted    = fitted(mixed_model),
+  Residuals = residuals(mixed_model, type = "response")
+) |>  
+  mutate(Std_Res_Sqrt = sqrt(abs(Residuals / sd(Residuals))))
+
+#===================================================
+# PLOT: Homogeneity of Variance
+#===================================================
+homo_var <- ggplot(diag_data, aes(x = Fitted, y = Std_Res_Sqrt)) +
+  geom_point(color = blue, alpha = 0.7, size = size_str) +
+  geom_smooth(method = "loess", color = apple, linewidth = linewidth_str, 
+              se = TRUE, fill = stone, alpha = 0.2) +
+  labs(
+    title = "Figure A: Homogeneity of Variance",
+    x = "Fitted values",
+    y = "√|Std. residuals|"
+  ) +
+  labs(caption = "Dataset: agreement.csv")
+
+ggplotly(homo_var)
+```
+
+**INTERPRETATION**
+
+When evaluating the homogeneity of variance (homoscedasticity) via the Scale-Location plot, the blue smooth loess line is not perfectly horizontal but remains highly stable and flat across the majority of the fitted values between 90 and 115 mmHg. A slight upward trend is observed between 115 and 130 mmHg, followed by a downward dip towards the higher extreme around 135–138 mmHg. 
+
+However, the grey confidence interval band widens significantly at this higher extreme, indicating that these fluctuations are primarily driven by a lower density of data points at elevated blood pressure levels rather than systematic heteroscedasticity. Because the residuals are evenly scattered vertically without forming a distinct "funnel" or "trumpet" shape, the assumption of homogeneous variance is considered sufficiently satisfied for the overall model.
+
+
+##### Normality of Residuals
+```{r normality, echo=FALSE, message=FALSE, warning=FALSE}
+#===================================================
+# PLOT: Normality of Residuals
+#===================================================
+p_norm <- ggplot(diag_data, aes(x = Residuals)) +
+  geom_density(fill = blue, alpha = 0.2, color = NA,) +
+  stat_function(
+    fun = dnorm, 
+    args = list(mean = mean(diag_data$Residuals), 
+                sd = sd(diag_data$Residuals)),
+    color = apple, linewidth = linewidth_str
+  ) +
+   scale_y_continuous(limits = c(0, 0.5), expand = c(0, 0)) +
+  labs(
+    title = "Figure B: Normality of Residuals",
+    x = "Residuals",
+    y = "Density"
+  ) 
+
+ggplotly(p_norm)
+```
+
+**INTERPRETATION**
+
+Figure B illustrates the empirical density distribution of the residuals (blue area) compared against a theoretical normal distribution reference curve (green line). The residuals exhibit a high degree of symmetry around a mean of zero, indicating no structural skewness in the model errors. 
+
+Visually, the empirical distribution appears slightly platykurtic (flatter peak and broader shoulders) relative to the ideal normal curve, meaning the density of data points directly around zero is somewhat lower than theoretically expected. However, because the distribution is symmetric and free of extreme heavy tails or severe outliers, this minor deviation in kurtosis is considered benign. Overall, the assumption of normality for the residuals is sufficiently satisfied to support the validity of the mixed model's parametric inferences.
+
+
+##### Check of independence
+```{r indenpendence, echo=FALSE, message=FALSE, warning=FALSE}
+plot_data <- agree_L %>% 
+  mutate(residuals = residuals(mixed_model, type = "response"))
+
+p_ind <- ggplot(plot_data, aes(x = test_nr, y = residuals, group = id)) +
+  geom_line(alpha = 0.3, linewidth = linewidth_str) +
+  scale_x_discrete(expand = c(0, 0)) +
+  labs(title = "Figure C: Conditional residuals across time and groups",
+       x     = "Physical status",
+       y     = "Conditional Residuals") 
+
+ggplotly(p_ind)
+```
+
+**INTERPRETATION**
+
+Figure C displays the conditional residuals for each individual connected across the two measurement timepoints. The plot exhibits a highly distinct "X-shape" (or bowtie) pattern centered around zero at the midpoint. 
+
+In a linear mixed model with a random intercept and exactly two repetitions per subject, this geometric pattern is a mathematical necessity rather than a violation of assumptions. The random intercept ($a_i$) captures the stable, between-person baseline level. Consequently, the remaining conditional residuals for any given individual must fundamentally mirror each other across the two timepoints ($\varepsilon_{i1} \approx -\varepsilon_{i2}$). Lines connecting a positive residual at timepoint 1 to a negative residual at timepoint 2 (and vice versa) will inevitably cross at the center. The few trajectories that appear less symmetrical are a result of the model's shrinkage effect (BLUPs). *Overall, this plot confirms that the random intercepts have successfully accounted for the correlation within subjects, leaving no further structural patterns in the error terms.*
+
+
+#### 4. The residuals must follow the same distribution for all individuals, including having a mean of zero and homogeneous variance (homoscedasticity).
+
+This was evaluted in the Bland-Altman plot..
+
+
+#### 5. The residuals must follow a normal distribution.
+
+This was evaluated through the Q-Q plot of differences..
+
+
+#### 6. The random effects must be independent across individuals.
+
+To evaluate Assumption 6—which states that the random effects must be independent across individuals—the estimated random intercepts (BLUPs) were ordered by value and plotted against a reference line at zero (\(y = 0\)). 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+random_effects <- as.data.frame(ranef(mixed_model)) %>% 
+  filter(grpvar == "id")
+
+p_random <- ggplot(random_effects, aes(x = reorder(grp, condval), y = condval)) +
+  geom_point(size = size_str) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = blue, linewidth = linewidth_str) +
+  labs(
+    title = "Check of Random Effects Independence",
+    x = "Individual ID (ordered by intercept value)",
+    y = "Estimated Random Intercept (BLUP)"
+  ) +
+  theme(axis.text.x = element_blank()) 
+
+ggplotly(p_random)
+```
+
+**INTERPRETATION**
+
+Visual inspection of the ordered random intercepts shows a smooth, continuous, S-shaped curve symmetrically distributed around the reference line. There are no sudden vertical shifts, steps, or distinct clusterings among the individual data points. 
+
+If the independence assumption were violated—for instance, due to an unmodeled nested structure or sub-groups within the population—the data points would exhibit noticeable discontinuities or fragmentation. Because the curve rises steadily and naturally, it confirms that the subjects vary continuously and independently of one another. Therefore, the assumption of independence across individuals is fully satisfied.
+
+
+
+#### 7. The random effects must follow the same distribution for all individuals, including having a mean of zero and homogeneous variance.
+
+To evaluate Assumption 7—which states that the random effects must follow the same distribution for all individuals, with a mean of zero and homogeneous variance—the distribution of the Best Linear Unbiased Predictors (BLUPs) for the random intercepts was visualized using a boxplot.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+blups <- as.data.frame(ranef(mixed_model)$id) |> 
+  rename(blup = `(Intercept)`)
+
+bp_plot <- ggplot(blups, aes(x = "", y = blup)) +
+  geom_boxplot(width = 0.3, outlier.shape = NA) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = blue, linewidth = linewidth_str) +
+  labs(
+    title = "Distribution of Random Intercepts (BLUPs)",
+    x = "",
+    y = "Estimated Random Intercept (BLUP)"
+  ) 
+
+ggplotly(bp_plot)
+```
+
+**INTERPRETATION**
+
+The horizontal median line within the box is positioned extremely close to the dashed reference line at zero, confirming that the individual-specific deviations from the overall group mean are centered around zero as theoretically assumed. Furthermore, the overall spread of the random intercepts exhibits a high degree of symmetry. The box components (representing the interquartile range) are evenly distributed above and below the zero line. Although the upper whisker extends slightly further than the lower whisker (reaching approximately 29 mmHg compared to -19 mmHg), the overall distribution remains well-balanced without severe skewness or extreme outliers. Consequently, the assumption that the random effects are stable, centered at zero, and homoscedastic across the sample is fully satisfied.
+
+
+
+#### 8. Normality of Random Effects: The individual-specific deviations (the random intercepts) follow a normal distribution around zero.
+
+To evaluate whether the individual-specific deviations (the random intercepts) follow a normal distribution around zero, a Quantile-Quantile (QQ) plot of the Best Linear Unbiased Predictors (BLUPs) was examined.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+blup_data <- tibble(blup = ranef(mixed_model, drop = TRUE)$id) %>% 
+  arrange(blup) %>% 
+  mutate(theoretical = qnorm(ppoints(n())))
+
+p <- ggplot(blup_data, aes(x = theoretical, y = blup)) +
+  geom_smooth(method = "lm", formula = y ~ x, 
+              color = blue, linetype = "dashed", se = FALSE, linewidth = linewidth_str) +
+  geom_point(size = size_str, alpha = 0.7) +
+  labs(
+    title = "QQ-plot of Random Effects",
+    x = "Theoretical Quantiles",
+    y = "BLUP"
+  ) 
+p_final <- ggplotly(p)
+p_final
+```
+
+**INTERPRETATION**
+
+The figure above shows the QQ-plot of the estimated random effects (BLUPs) to evaluate Assumption 8. In the central region, the data points follow the dashed reference line closely, indicating that the baseline deviations for the majority of individuals are normally distributed.  **Overall, the normality assumption for the random effects is considered partially satisfied, with minor skewness in the extremes.**
+ 
+#### The overall conclusion 
+
+In summary, the comprehensive evaluation of the model assumptions (Assumptions 1–8) reveals a generally robust diagnostic performance. 
+
+-------------------------
+
+### The different variance 
+
+In the previous sections, we have calculated two different standard deviations for the measurement noise:
+
+1. **Paired t-test / Bland-Altman:** The estimate is based only upon the differences (\(\text{dif} = \text{måling}_2 - \text{måling}_1\)), which yielded an estimated standard deviation of \(\text{SD}_{\text{dif}} = 3.52\).
+
+2. **Linear Mixed Model:** Here, the total variation is split up, and the standard deviation within the same individual is estimated as the residual standard deviation, \(\text{SD}_{\text{residual}} = \sigma_{\varepsilon} = 2.49\).
+
+These two components are mathematically correlated through the following variance-identity formulas:
+
+$$
+\begin{aligned}
+\text{Variance on difference} &= \text{Var(test)}_2 + \text{Var(test)}_1 \\
+&= \sigma^2_\varepsilon + \sigma^2_\varepsilon \\
+&= 2 \cdot \sigma^2_\varepsilon
+\end{aligned}
+$$
+
+
+
+
+
+
+
+
+
+
